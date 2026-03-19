@@ -316,8 +316,13 @@ local function SlashHandler(msg)
         })
 
         print("|cffff0000[WORLD BOSS]|r Announced: " .. fullBossName .. " Layer " .. layer)
-        print("|cff00ff00[DiscordBridge]|r Alert queued. Run /reload to flush immediately.")
+        print("|cff00ff00[DiscordBridge]|r Reloading UI to send alert...")
         PlaySound(8959) -- RAID_WARNING sound
+
+        -- Reload UI after a short delay to flush the alert
+        C_Timer.After(1, function()
+            ReloadUI()
+        end)
 
     else
         print("|cff00ff00[DiscordBridge]|r v" .. VERSION .. " - World Boss Announcer")
