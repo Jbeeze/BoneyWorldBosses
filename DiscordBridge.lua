@@ -279,16 +279,57 @@ local function SlashHandler(msg)
         })
         print("|cff00ff00[DiscordBridge]|r Test alert queued. Run /reload to flush.")
 
+    elseif cmd == "announce" then
+        -- Manual announcement: /wb announce <boss> [layer]
+        local bossName = args[2]
+        local layer = args[3] or "1"
+
+        if not bossName then
+            print("|cff00ff00[DiscordBridge]|r Usage: /wb announce <boss> [layer]")
+            print("  Example: /wb announce kazzak 1")
+            print("  Bosses: kazzak, doomwalker")
+            return
+        end
+
+        -- Normalize boss name
+        local bosses = {
+            kazzak = "Doom Lord Kazzak",
+            doomwalker = "Doomwalker",
+        }
+
+        local fullBossName = bosses[string.lower(bossName)]
+        if not fullBossName then
+            print("|cff00ff00[DiscordBridge]|r Unknown boss: " .. bossName)
+            print("  Valid bosses: kazzak, doomwalker")
+            return
+        end
+
+        local playerName = UnitName("player")
+        local zone = GetZoneText()
+        local subzone = GetSubZoneText()
+
+        QueueMessage("ANNOUNCE", playerName, fullBossName .. " spotted on Layer " .. layer .. "!", "announce", {
+            alertType = "PLAYER_ANNOUNCE",
+            boss = fullBossName,
+            layer = layer,
+            reporter = playerName,
+        })
+
+        print("|cffff0000[WORLD BOSS]|r Announced: " .. fullBossName .. " Layer " .. layer)
+        print("|cff00ff00[DiscordBridge]|r Alert queued. Run /reload to flush immediately.")
+        PlaySound(8959) -- RAID_WARNING sound
+
     else
         print("|cff00ff00[DiscordBridge]|r v" .. VERSION .. " - World Boss Announcer")
-        print("  /discordbridge status - Show status")
-        print("  /discordbridge flush - Clear message queue")
-        print("  /discordbridge autoreload on/off - Toggle auto-reload")
-        print("  /discordbridge interval <seconds> - Set auto-reload interval")
-        print("  /discordbridge bosses on/off - Toggle boss yell monitoring")
-        print("  /discordbridge general on/off - Toggle general chat monitoring")
-        print("  /discordbridge test - Send a test alert")
-        print("  /discordbridge enable/disable - Enable or disable addon")
+        print("  /wb announce <boss> [layer] - Announce a boss sighting")
+        print("  /wb status - Show status")
+        print("  /wb flush - Clear message queue")
+        print("  /wb autoreload on/off - Toggle auto-reload")
+        print("  /wb interval <seconds> - Set auto-reload interval")
+        print("  /wb bosses on/off - Toggle boss yell monitoring")
+        print("  /wb general on/off - Toggle general chat monitoring")
+        print("  /wb test - Send a test alert")
+        print("  /wb enable/disable - Enable or disable addon")
     end
 end
 

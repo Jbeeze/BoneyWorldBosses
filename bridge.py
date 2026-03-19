@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 World Boss Announcer - Discord Bridge
-Polls WoW SavedVariables for Kazzak/Doomwalker alerts and posts to Discord.
+Polls WoW SavedVariables for Kazzak/Doomwalker alerts and posts to Discord bot.
 Target: TBC Anniversary addon (DiscordBridge)
 """
 
@@ -10,7 +10,6 @@ import os
 import re
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 
 import requests
@@ -19,8 +18,10 @@ import requests
 # CONFIGURATION - Edit these values
 # =============================================================================
 CONFIG = {
-    # Discord webhook URL (required)
-    "WEBHOOK_URL": "",
+    # Bot API URL (your WorldBossTracker bot)
+    # Local: http://localhost:3000
+    # Render: https://your-app-name.onrender.com
+    "BOT_API_URL": "http://localhost:3000",
 
     # Path to SavedVariables file (required)
     # Example: /path/to/WoW/_classic_/WTF/Account/ACCOUNTNAME/SavedVariables/DiscordBridge.lua
@@ -29,29 +30,13 @@ CONFIG = {
     # Seconds between polling checks
     "POLL_INTERVAL": 5,
 
-    # Discord webhook display name
-    "USERNAME": "World Boss Alert",
-
-    # Avatar URL for Discord webhook (optional)
-    "AVATAR_URL": "",
-
-    # Ping @everyone for boss yells (boss actually spawned)
-    "PING_ON_BOSS_YELL": True,
-
     # Filter which channels to forward (empty list = all)
-    # Options: boss_yell, general, test
-    "CHANNEL_FILTER": ["boss_yell", "general", "test"],
+    # Options: boss_yell, general, announce, test
+    "CHANNEL_FILTER": ["boss_yell", "general", "announce", "test"],
 }
 
 # State file path (same directory as this script)
 STATE_FILE = Path(__file__).parent / "bridge_state.json"
-
-# Color codes for Discord embeds (decimal)
-CHANNEL_COLORS = {
-    "boss_yell": 0xFF0000,   # Red - Boss is speaking! High priority
-    "general": 0xFFAA00,     # Orange - Player report in general chat
-    "test": 0x808080,        # Gray - Test message
-}
 
 
 # =============================================================================
@@ -248,110 +233,51 @@ def save_state(state: dict) -> None:
 
 
 # =============================================================================
-# DISCORD FORMATTING
+# BOT API
 # =============================================================================
 
-def format_discord_embed(entry: dict) -> dict:
-    """Format a queue entry as a Discord embed."""
-    channel = entry.get("channel", "unknown")
-    alert_type = entry.get("alertType", "")
-    color = CHANNEL_COLORS.get(channel, 0x808080)
-
-    author = entry.get("author", "Unknown")
-    msg = entry.get("msg", "")
-    timestamp = entry.get("t", int(time.time()))
-    zone = entry.get("zone", "")
-    subzone = entry.get("subzone", "")
-
-    # Format timestamp for Discord
-    dt = datetime.utcfromtimestamp(timestamp)
-    iso_timestamp = dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-
-    # Build location string
-    location = subzone if subzone else zone
-    if subzone and zone and subzone != zone:
-        location = f"{subzone}, {zone}"
-
-    # Determine title based on alert type
-    if alert_type == "BOSS_YELL":
-        title = f"WORLD BOSS: {author}"
-        description = f'> "{msg}"'
-    elif alert_type == "PLAYER_REPORT":
-        keyword = entry.get("keyword", "")
-        title = f"Player Report: {keyword.upper()}"
-        description = f"**{author}** in General chat:\n> {msg}"
-    elif alert_type == "TEST":
-        title = "Test Alert"
-        description = msg
-    else:
-        title = f"Alert from {author}"
-        description = msg
-
-    embed = {
-        "title": title,
-        "color": color,
-        "description": description,
-        "timestamp": iso_timestamp,
-        "footer": {
-            "text": f"Zone: {location}" if location else "Unknown location"
-        }
-    }
-
-    return embed
-
-
-def post_to_discord(entries: list) -> bool:
-    """Post entries to Discord webhook. Returns True on success."""
-    if not CONFIG["WEBHOOK_URL"]:
-        print("[ERROR] No webhook URL configured!")
+def post_to_bot(entries: list) -> bool:
+    """Post entries to bot API. Returns True on success."""
+    if not CONFIG["BOT_API_URL"]:
+        print("[ERROR] No bot API URL configured!")
         return False
 
     if not entries:
         return True
 
+    api_url = CONFIG["BOT_API_URL"].rstrip("/") + "/webhook/alert"
+
     # Process each entry
     for entry in entries:
-        alert_type = entry.get("alertType", "")
-        channel = entry.get("channel", "")
-
-        # Build payload
+        # Build payload matching what the bot expects
         payload = {
-            "username": CONFIG["USERNAME"],
-            "embeds": [format_discord_embed(entry)]
+            "alertType": entry.get("alertType", ""),
+            "author": entry.get("author", "Unknown"),
+            "msg": entry.get("msg", ""),
+            "channel": entry.get("channel", ""),
+            "zone": entry.get("zone", ""),
+            "subzone": entry.get("subzone", ""),
+            "keyword": entry.get("keyword", ""),
+            "boss": entry.get("boss", ""),
+            "layer": entry.get("layer", ""),
         }
 
-        if CONFIG.get("AVATAR_URL"):
-            payload["avatar_url"] = CONFIG["AVATAR_URL"]
-
-        # Add @everyone ping for boss yells if enabled
-        if alert_type == "BOSS_YELL" and CONFIG.get("PING_ON_BOSS_YELL"):
-            payload["content"] = "@everyone WORLD BOSS DETECTED!"
-
         try:
-            response = requests.post(
-                CONFIG["WEBHOOK_URL"],
-                json=payload,
-                timeout=10
-            )
+            response = requests.post(api_url, json=payload, timeout=10)
 
-            # Handle rate limiting
-            if response.status_code == 429:
-                retry_after = response.json().get("retry_after", 1)
-                print(f"[RATE LIMITED] Waiting {retry_after}s...")
-                time.sleep(retry_after)
-                # Retry
-                response = requests.post(
-                    CONFIG["WEBHOOK_URL"],
-                    json=payload,
-                    timeout=10
-                )
-
-            if response.status_code not in (200, 204):
-                print(f"[ERROR] Discord returned {response.status_code}: {response.text}")
+            if response.status_code == 503:
+                print("[ERROR] Bot not connected to Discord yet")
                 return False
 
-            # Small delay between messages to avoid rate limits
-            time.sleep(0.5)
+            if response.status_code not in (200, 201):
+                print(f"[ERROR] Bot API returned {response.status_code}: {response.text}")
+                return False
+
+            result = response.json()
+            print(f"[BOT] Alert sent to {result.get('channelsSent', 0)} channel(s)")
+
+            # Small delay between messages
+            time.sleep(0.3)
 
         except requests.RequestException as e:
             print(f"[ERROR] Network error: {e}")
@@ -367,10 +293,10 @@ def post_to_discord(entries: list) -> bool:
 def main_loop() -> None:
     """Main polling loop."""
     print(f"[WorldBossAnnouncer] Starting bridge...")
+    print(f"  Bot API: {CONFIG['BOT_API_URL']}")
     print(f"  SavedVariables: {CONFIG['SV_PATH']}")
     print(f"  Poll interval: {CONFIG['POLL_INTERVAL']}s")
     print(f"  Watching for: Kazzak, Doomwalker")
-    print(f"  Ping @everyone on boss yell: {CONFIG['PING_ON_BOSS_YELL']}")
     print()
 
     state = load_state()
@@ -433,8 +359,8 @@ def main_loop() -> None:
                 author = entry.get("author", "?")
                 print(f"[ALERT] {alert_type}: {author}")
 
-            # Post to Discord
-            if post_to_discord(new_entries):
+            # Post to bot
+            if post_to_bot(new_entries):
                 # Update state with highest ID sent
                 max_id = max(entry.get("id", 0) for entry in new_entries)
                 state["last_sent_id"] = max_id
@@ -454,8 +380,8 @@ def validate_config() -> bool:
     """Validate configuration before starting."""
     errors = []
 
-    if not CONFIG["WEBHOOK_URL"]:
-        errors.append("WEBHOOK_URL is not set")
+    if not CONFIG["BOT_API_URL"]:
+        errors.append("BOT_API_URL is not set")
 
     if not CONFIG["SV_PATH"]:
         errors.append("SV_PATH is not set")
@@ -473,8 +399,9 @@ def validate_config() -> bool:
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("  World Boss Announcer - Discord Bridge v1.0")
-    print("  Watches for Kazzak/Doomwalker and posts to Discord")
+    print("  World Boss Announcer - Bridge v1.0")
+    print("  Watches for Kazzak/Doomwalker alerts")
+    print("  Posts to WorldBossTracker bot")
     print("=" * 60)
     print()
 
