@@ -280,10 +280,19 @@ local function SlashHandler(msg)
         })
         print("|cff00ff00[WorldBossAnnouncer]|r Testing Discord connection...")
 
-        -- Reload UI to send the test immediately
-        C_Timer.After(1, function()
-            ReloadUI()
-        end)
+        -- Reload UI to send the test immediately (if not in combat)
+        if InCombatLockdown() then
+            print("|cffff0000[WorldBossAnnouncer]|r In combat - will reload after combat ends.")
+            local combatFrame = CreateFrame("Frame")
+            combatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+            combatFrame:SetScript("OnEvent", function(self)
+                self:UnregisterAllEvents()
+                print("|cff00ff00[WorldBossAnnouncer]|r Combat ended, reloading...")
+                C_Timer.After(1, ReloadUI)
+            end)
+        else
+            C_Timer.After(1, ReloadUI)
+        end
 
     elseif cmd == "announce" then
         -- Manual announcement: /wba announce <boss> [layer]
@@ -322,13 +331,22 @@ local function SlashHandler(msg)
         })
 
         print("|cffff0000[WORLD BOSS]|r Announced: " .. fullBossName .. " Layer " .. layer)
-        print("|cff00ff00[WorldBossAnnouncer]|r Reloading UI to send alert...")
         PlaySound(8959) -- RAID_WARNING sound
 
-        -- Reload UI after a short delay to flush the alert
-        C_Timer.After(1, function()
-            ReloadUI()
-        end)
+        -- Reload UI to send the alert (if not in combat)
+        if InCombatLockdown() then
+            print("|cffff0000[WorldBossAnnouncer]|r In combat - will reload after combat ends.")
+            local combatFrame = CreateFrame("Frame")
+            combatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+            combatFrame:SetScript("OnEvent", function(self)
+                self:UnregisterAllEvents()
+                print("|cff00ff00[WorldBossAnnouncer]|r Combat ended, reloading...")
+                C_Timer.After(1, ReloadUI)
+            end)
+        else
+            print("|cff00ff00[WorldBossAnnouncer]|r Reloading UI to send alert...")
+            C_Timer.After(1, ReloadUI)
+        end
 
     else
         print("|cff00ff00[WorldBossAnnouncer]|r v" .. VERSION .. " - World Boss Announcer")
