@@ -19,9 +19,9 @@ A WoW Classic TBC Anniversary addon that detects world boss activity and forward
 ## Features
 
 - **Boss Yell Detection**: Automatically detects when Doom Lord Kazzak or Doomwalker yells (spawns)
-- **General Chat Monitoring**: Watches for players mentioning "kazzak" or "doomwalker" in General chat
+- **Guild Chat Monitoring**: Watches for "Kazzak up L1", "Kazz up L2", "Doomwalker up L1" patterns
+- **Whisper Monitoring**: Same patterns via whisper, supports `[TEST]` prefix for no-ping testing
 - **Manual Announcements**: Use `/wba announce` to report a boss sighting
-- **Auto-Reload**: Periodically reloads UI to flush alerts (configurable)
 
 ## Installation
 
@@ -78,14 +78,13 @@ The bridge must run on the same machine as WoW since it reads local SavedVariabl
 | Command | Description |
 |---------|-------------|
 | `/wba` | Show help |
-| `/wba announce <boss> [layer]` | Announce a boss sighting (auto-reloads UI) |
+| `/wba announce <boss> [layer]` | Announce a boss sighting |
 | `/wba status` | Show queue and config status |
 | `/wba test` | Send a test alert |
 | `/wba flush` | Clear the message queue |
-| `/wba autoreload on/off` | Toggle auto-reload (default: on) |
-| `/wba interval <seconds>` | Set auto-reload interval (default: 120s) |
 | `/wba bosses on/off` | Toggle boss yell monitoring |
-| `/wba general on/off` | Toggle general chat monitoring |
+| `/wba guild on/off` | Toggle guild chat monitoring |
+| `/wba whisper on/off` | Toggle whisper monitoring |
 | `/wba enable/disable` | Enable or disable the addon |
 
 ### Examples

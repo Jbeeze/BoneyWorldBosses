@@ -22,8 +22,6 @@ local GUILD_PATTERNS = {
 local DEFAULT_CONFIG = {
     enabled = true,
     maxQueue = 200,
-    autoReload = true,
-    autoReloadInterval = 120,
     watchBossYells = true,
     watchGuildChat = true,
     watchWhispers = true,
@@ -37,7 +35,6 @@ local CHANNEL_LABELS = {
 
 -- Create hidden frame for event handling
 local frame = CreateFrame("Frame")
-local autoReloadTicker = nil
 
 -- Popup dialog for reload confirmation (required for protected function)
 StaticPopupDialogs["WORLDBOSSANNOUNCER_RELOAD"] = {
@@ -60,6 +57,13 @@ local function InitializeDB()
 
     if not WorldBossAnnouncerDB.config then
         WorldBossAnnouncerDB.config = CopyTable(DEFAULT_CONFIG)
+    else
+        -- Ensure all default config values exist (for upgrades)
+        for key, value in pairs(DEFAULT_CONFIG) do
+            if WorldBossAnnouncerDB.config[key] == nil then
+                WorldBossAnnouncerDB.config[key] = value
+            end
+        end
     end
 
     if not WorldBossAnnouncerDB.queue then
@@ -124,7 +128,6 @@ local function OnEvent(self, event, ...)
         local addonName = ...
         if addonName == ADDON_NAME then
             InitializeDB()
-            SetupAutoReload()
             print("|cff00ff00[WorldBossAnnouncer]|r World Boss Announcer loaded.")
             print("|cff00ff00[WorldBossAnnouncer]|r Watching for: Doom Lord Kazzak, Doomwalker")
             print("|cff00ff00[WorldBossAnnouncer]|r Type /discordbridge for commands.")
@@ -229,28 +232,6 @@ local function OnEvent(self, event, ...)
     end
 end
 
--- Auto-reload functionality
-function SetupAutoReload()
-    -- Cancel existing ticker if any
-    if autoReloadTicker then
-        autoReloadTicker:Cancel()
-        autoReloadTicker = nil
-    end
-
-    if not WorldBossAnnouncerDB.config.autoReload then return end
-
-    local interval = WorldBossAnnouncerDB.config.autoReloadInterval or 120
-
-    autoReloadTicker = C_Timer.NewTicker(interval, function()
-        -- Only reload if there are pending messages
-        if #WorldBossAnnouncerDB.queue > 0 then
-            print("|cff00ff00[WorldBossAnnouncer]|r Auto-reloading to flush " .. #WorldBossAnnouncerDB.queue .. " alert(s)...")
-            C_Timer.After(1, function()
-                ReloadUI()
-            end)
-        end
-    end)
-end
 
 -- Slash command handler
 local function SlashHandler(msg)
@@ -266,8 +247,6 @@ local function SlashHandler(msg)
         print("  Enabled: " .. (WorldBossAnnouncerDB.config.enabled and "|cff00ff00YES|r" or "|cffff0000NO|r"))
         print("  Queue: " .. #WorldBossAnnouncerDB.queue .. " / " .. WorldBossAnnouncerDB.config.maxQueue)
         print("  Last ID: " .. WorldBossAnnouncerDB.meta.lastId)
-        print("  Auto-reload: " .. (WorldBossAnnouncerDB.config.autoReload and "ON" or "OFF") ..
-              " (" .. WorldBossAnnouncerDB.config.autoReloadInterval .. "s)")
         print("  Watch boss yells: " .. (WorldBossAnnouncerDB.config.watchBossYells and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
         print("  Watch guild chat: " .. (WorldBossAnnouncerDB.config.watchGuildChat and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
         print("  Watch whispers: " .. (WorldBossAnnouncerDB.config.watchWhispers and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
@@ -276,30 +255,6 @@ local function SlashHandler(msg)
         local count = #WorldBossAnnouncerDB.queue
         WorldBossAnnouncerDB.queue = {}
         print("|cff00ff00[WorldBossAnnouncer]|r Flushed " .. count .. " messages from queue.")
-
-    elseif cmd == "autoreload" then
-        local setting = args[2]
-        if setting == "on" then
-            WorldBossAnnouncerDB.config.autoReload = true
-            SetupAutoReload()
-            print("|cff00ff00[WorldBossAnnouncer]|r Auto-reload enabled.")
-        elseif setting == "off" then
-            WorldBossAnnouncerDB.config.autoReload = false
-            SetupAutoReload()
-            print("|cff00ff00[WorldBossAnnouncer]|r Auto-reload disabled.")
-        else
-            print("|cff00ff00[WorldBossAnnouncer]|r Usage: /discordbridge autoreload on/off")
-        end
-
-    elseif cmd == "interval" then
-        local seconds = tonumber(args[2])
-        if seconds and seconds >= 30 then
-            WorldBossAnnouncerDB.config.autoReloadInterval = seconds
-            SetupAutoReload()
-            print("|cff00ff00[WorldBossAnnouncer]|r Auto-reload interval set to " .. seconds .. " seconds.")
-        else
-            print("|cff00ff00[WorldBossAnnouncer]|r Usage: /discordbridge interval <seconds> (minimum 30)")
-        end
 
     elseif cmd == "enable" then
         WorldBossAnnouncerDB.config.enabled = true
@@ -399,8 +354,6 @@ local function SlashHandler(msg)
         print("  /wba announce <boss> [layer] - Announce a boss sighting")
         print("  /wba status - Show status")
         print("  /wba flush - Clear message queue")
-        print("  /wba autoreload on/off - Toggle auto-reload")
-        print("  /wba interval <seconds> - Set auto-reload interval")
         print("  /wba bosses on/off - Toggle boss yell monitoring")
         print("  /wba guild on/off - Toggle guild chat monitoring")
         print("  /wba whisper on/off - Toggle whisper monitoring")
