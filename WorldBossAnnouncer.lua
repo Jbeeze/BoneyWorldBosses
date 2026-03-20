@@ -139,10 +139,24 @@ local function OnEvent(self, event, ...)
         local msg, mobName = ...
 
         if WORLD_BOSSES[mobName] then
+            -- Try to get layer from TresLayerSwap WA or NovaWorldBuffs
+            local layer = "?"
+            if _G["TLS"] and _G["TLS"].layer and _G["TLS"].layer ~= 0 then
+                layer = tostring(_G["TLS"].layer)
+            elseif _G["NWB_CurrentLayer"] and _G["NWB_CurrentLayer"] ~= 0 then
+                layer = tostring(_G["NWB_CurrentLayer"])
+            elseif _G["TLSLayer"] and _G["TLSLayer"] ~= 0 then
+                layer = tostring(_G["TLSLayer"])
+            end
+
             QueueMessage(event, mobName, msg, "boss_yell", {
                 alertType = "BOSS_YELL",
                 boss = mobName,
+                layer = layer,
             })
+
+            -- Show reload popup immediately for boss yells
+            StaticPopup_Show("WORLDBOSSANNOUNCER_RELOAD")
         end
         return
     end
