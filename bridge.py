@@ -34,8 +34,8 @@ CONFIG = {
     "POLL_INTERVAL": 5,
 
     # Filter which channels to forward (empty list = all)
-    # Options: boss_yell, general, announce, test
-    "CHANNEL_FILTER": ["boss_yell", "general", "announce", "test"],
+    # Options: boss_yell, announce, guild, whisper, test
+    "CHANNEL_FILTER": ["boss_yell", "announce", "guild", "whisper", "test"],
 }
 
 # State file path (same directory as this script)

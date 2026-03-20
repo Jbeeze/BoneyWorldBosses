@@ -11,10 +11,11 @@ local WORLD_BOSSES = {
     ["Doomwalker"] = true,  -- Can add more world bosses
 }
 
--- Keywords to watch for in general chat (case-insensitive)
-local KEYWORDS = {
-    "kazzak",
-    "doomwalker",
+-- Guild/whisper patterns: "Kazzak up L1", "Kazz up L2", "Doomwalker up L1", etc.
+local GUILD_PATTERNS = {
+    { pattern = "[Kk]azzak%s+up%s+[Ll](%d+)", boss = "Doom Lord Kazzak" },
+    { pattern = "[Kk]azz%s+up%s+[Ll](%d+)", boss = "Doom Lord Kazzak" },
+    { pattern = "[Dd]oomwalker%s+up%s+[Ll](%d+)", boss = "Doomwalker" },
 }
 
 -- Default configuration
@@ -24,7 +25,8 @@ local DEFAULT_CONFIG = {
     autoReload = true,
     autoReloadInterval = 120,
     watchBossYells = true,
-    watchGeneralChat = true,
+    watchGuildChat = true,
+    watchWhispers = true,
 }
 
 -- Channel labels for each event type
@@ -75,17 +77,6 @@ local function InitializeDB()
     -- Update player info on each login
     WorldBossAnnouncerDB.meta.playerName = UnitName("player")
     WorldBossAnnouncerDB.meta.realmName = GetRealmName()
-end
-
--- Check if message contains any watched keywords
-local function ContainsKeyword(msg)
-    local lowerMsg = string.lower(msg)
-    for _, keyword in ipairs(KEYWORDS) do
-        if string.find(lowerMsg, keyword, 1, true) then
-            return keyword
-        end
-    end
-    return nil
 end
 
 -- Add message to queue
@@ -156,26 +147,57 @@ local function OnEvent(self, event, ...)
         return
     end
 
-    -- General chat (channel chat)
-    if event == "CHAT_MSG_CHANNEL" then
-        if not WorldBossAnnouncerDB.config.watchGeneralChat then return end
+    -- Guild chat - look for "Kazzak up L1", "Kazz up L2", "Doomwalker up L1", etc.
+    if event == "CHAT_MSG_GUILD" then
+        if not WorldBossAnnouncerDB.config.watchGuildChat then return end
 
-        local msg, author, _, _, _, _, _, channelIndex, channelName = ...
+        local msg, author = ...
 
-        -- Check if it's General chat (channel names like "General - Hellfire Peninsula")
-        local isGeneral = string.find(string.lower(channelName or ""), "general", 1, true)
-
-        if isGeneral then
-            local keyword = ContainsKeyword(msg)
-            if keyword then
+        -- Check each pattern
+        for _, patternInfo in ipairs(GUILD_PATTERNS) do
+            local layer = string.match(msg, patternInfo.pattern)
+            if layer then
                 -- Strip realm name from author
                 author = string.match(author, "([^-]+)") or author
 
-                QueueMessage(event, author, msg, "general", {
-                    alertType = "PLAYER_REPORT",
-                    keyword = keyword,
-                    channelName = channelName,
+                QueueMessage(event, author, patternInfo.boss .. " UP Layer " .. layer, "guild", {
+                    alertType = "GUILD_REPORT",
+                    boss = patternInfo.boss,
+                    layer = layer,
+                    reporter = author,
                 })
+
+                -- Show reload popup immediately for guild reports
+                StaticPopup_Show("WORLDBOSSANNOUNCER_RELOAD")
+                return
+            end
+        end
+        return
+    end
+
+    -- Whispers - look for same patterns as guild chat
+    if event == "CHAT_MSG_WHISPER" then
+        if not WorldBossAnnouncerDB.config.watchWhispers then return end
+
+        local msg, author = ...
+
+        -- Check each pattern
+        for _, patternInfo in ipairs(GUILD_PATTERNS) do
+            local layer = string.match(msg, patternInfo.pattern)
+            if layer then
+                -- Strip realm name from author
+                author = string.match(author, "([^-]+)") or author
+
+                QueueMessage(event, author, patternInfo.boss .. " UP Layer " .. layer, "whisper", {
+                    alertType = "WHISPER_REPORT",
+                    boss = patternInfo.boss,
+                    layer = layer,
+                    reporter = author,
+                })
+
+                -- Show reload popup immediately for whisper reports
+                StaticPopup_Show("WORLDBOSSANNOUNCER_RELOAD")
+                return
             end
         end
         return
@@ -222,7 +244,8 @@ local function SlashHandler(msg)
         print("  Auto-reload: " .. (WorldBossAnnouncerDB.config.autoReload and "ON" or "OFF") ..
               " (" .. WorldBossAnnouncerDB.config.autoReloadInterval .. "s)")
         print("  Watch boss yells: " .. (WorldBossAnnouncerDB.config.watchBossYells and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
-        print("  Watch general chat: " .. (WorldBossAnnouncerDB.config.watchGeneralChat and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
+        print("  Watch guild chat: " .. (WorldBossAnnouncerDB.config.watchGuildChat and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
+        print("  Watch whispers: " .. (WorldBossAnnouncerDB.config.watchWhispers and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
 
     elseif cmd == "flush" then
         local count = #WorldBossAnnouncerDB.queue
@@ -273,16 +296,28 @@ local function SlashHandler(msg)
             print("|cff00ff00[WorldBossAnnouncer]|r Usage: /discordbridge bosses on/off")
         end
 
-    elseif cmd == "general" then
+    elseif cmd == "guild" then
         local setting = args[2]
         if setting == "on" then
-            WorldBossAnnouncerDB.config.watchGeneralChat = true
-            print("|cff00ff00[WorldBossAnnouncer]|r General chat monitoring enabled.")
+            WorldBossAnnouncerDB.config.watchGuildChat = true
+            print("|cff00ff00[WorldBossAnnouncer]|r Guild chat monitoring enabled.")
         elseif setting == "off" then
-            WorldBossAnnouncerDB.config.watchGeneralChat = false
-            print("|cff00ff00[WorldBossAnnouncer]|r General chat monitoring disabled.")
+            WorldBossAnnouncerDB.config.watchGuildChat = false
+            print("|cff00ff00[WorldBossAnnouncer]|r Guild chat monitoring disabled.")
         else
-            print("|cff00ff00[WorldBossAnnouncer]|r Usage: /discordbridge general on/off")
+            print("|cff00ff00[WorldBossAnnouncer]|r Usage: /wba guild on/off")
+        end
+
+    elseif cmd == "whisper" or cmd == "whispers" then
+        local setting = args[2]
+        if setting == "on" then
+            WorldBossAnnouncerDB.config.watchWhispers = true
+            print("|cff00ff00[WorldBossAnnouncer]|r Whisper monitoring enabled.")
+        elseif setting == "off" then
+            WorldBossAnnouncerDB.config.watchWhispers = false
+            print("|cff00ff00[WorldBossAnnouncer]|r Whisper monitoring disabled.")
+        else
+            print("|cff00ff00[WorldBossAnnouncer]|r Usage: /wba whisper on/off")
         end
 
     elseif cmd == "test" then
@@ -342,7 +377,8 @@ local function SlashHandler(msg)
         print("  /wba autoreload on/off - Toggle auto-reload")
         print("  /wba interval <seconds> - Set auto-reload interval")
         print("  /wba bosses on/off - Toggle boss yell monitoring")
-        print("  /wba general on/off - Toggle general chat monitoring")
+        print("  /wba guild on/off - Toggle guild chat monitoring")
+        print("  /wba whisper on/off - Toggle whisper monitoring")
         print("  /wba test - Send a test alert")
         print("  /wba enable/disable - Enable or disable addon")
     end
@@ -356,6 +392,7 @@ SlashCmdList["WORLDBOSSANNOUNCER"] = SlashHandler
 -- Register events
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("CHAT_MSG_MONSTER_YELL")  -- Boss yells
-frame:RegisterEvent("CHAT_MSG_CHANNEL")        -- General chat
+frame:RegisterEvent("CHAT_MSG_GUILD")          -- Guild chat
+frame:RegisterEvent("CHAT_MSG_WHISPER")        -- Whispers
 
 frame:SetScript("OnEvent", OnEvent)
