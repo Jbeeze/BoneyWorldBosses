@@ -20,8 +20,8 @@ import requests
 CONFIG = {
     # Bot API URL (your WorldBossTracker bot)
     # Local: http://localhost:3000
-    # Render: https://your-app-name.onrender.com
-    "BOT_API_URL": "http://localhost:3000",
+    # Render: https://worldbosstrackerdiscordbot.onrender.com
+    "BOT_API_URL": "https://worldbosstrackerdiscordbot.onrender.com",
 
     # Path to SavedVariables file (required)
     # Example: /path/to/WoW/_classic_/WTF/Account/ACCOUNTNAME/SavedVariables/DiscordBridge.lua

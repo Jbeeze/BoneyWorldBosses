@@ -52,7 +52,7 @@ Edit `bridge.py` and set your configuration:
 ```python
 CONFIG = {
     # Your WorldBossTracker bot URL
-    "BOT_API_URL": "https://your-bot.onrender.com",
+    "BOT_API_URL": "https://worldbosstrackerdiscordbot.onrender.com",
 
     # Path to SavedVariables file
     # macOS: /Applications/World of Warcraft/_classic_/WTF/Account/ACCOUNTNAME/SavedVariables/DiscordBridge.lua
