@@ -273,11 +273,17 @@ local function SlashHandler(msg)
         end
 
     elseif cmd == "test" then
-        -- Send a test alert
-        QueueMessage("TEST", "TestPlayer", "Test alert - Kazzak spotted!", "test", {
+        -- Send a test alert (no @everyone ping)
+        local playerName = UnitName("player")
+        QueueMessage("TEST", playerName, "Test alert - Discord connection working!", "test", {
             alertType = "TEST",
         })
-        print("|cff00ff00[WorldBossAnnouncer]|r Test alert queued. Run /reload to flush.")
+        print("|cff00ff00[WorldBossAnnouncer]|r Testing Discord connection...")
+
+        -- Reload UI to send the test immediately
+        C_Timer.After(1, function()
+            ReloadUI()
+        end)
 
     elseif cmd == "announce" then
         -- Manual announcement: /wba announce <boss> [layer]
