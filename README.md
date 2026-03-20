@@ -82,7 +82,11 @@ CONFIG = {
 
 ### 4. Run the Bridge
 
-Run while playing WoW:
+**Easy way:** Double-click the launcher:
+- **macOS**: `run_bridge.command`
+- **Windows**: `run_bridge.bat`
+
+**Or via command line:**
 ```bash
 python bridge.py
 ```
@@ -153,6 +157,8 @@ WorldBossAnnouncer/
 ├── WorldBossAnnouncer.toc    # Addon metadata (Interface 20504)
 ├── WorldBossAnnouncer.lua    # Main addon code
 ├── bridge.py                 # Python bridge script
+├── run_bridge.command        # macOS launcher (double-click)
+├── run_bridge.bat            # Windows launcher (double-click)
 ├── requirements.txt          # Python dependencies
 ├── bridge_state.json         # Bridge position state (auto-created)
 └── README.md

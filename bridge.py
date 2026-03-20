@@ -82,7 +82,7 @@ LOG_LINE_PATTERNS = {
 }
 
 
-def parse_log_line(line: str) -> dict | None:
+def parse_log_line(line: str):
     """
     Parse a chat log line and return structured data if it matches a watched channel.
     Returns: {"channel": str, "author": str, "message": str} or None
@@ -103,7 +103,7 @@ def parse_log_line(line: str) -> dict | None:
     return None
 
 
-def check_boss_pattern(message: str) -> tuple | None:
+def check_boss_pattern(message: str):
     """
     Check if message matches a boss announcement pattern.
     Returns: (boss_name, layer) or None
@@ -116,7 +116,7 @@ def check_boss_pattern(message: str) -> tuple | None:
     return None
 
 
-def check_boss_yell(author: str) -> str | None:
+def check_boss_yell(author: str):
     """
     Check if the author is a world boss (for yell detection).
     Returns: boss_name or None
