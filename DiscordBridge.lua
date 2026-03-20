@@ -280,13 +280,13 @@ local function SlashHandler(msg)
         print("|cff00ff00[DiscordBridge]|r Test alert queued. Run /reload to flush.")
 
     elseif cmd == "announce" then
-        -- Manual announcement: /wb announce <boss> [layer]
+        -- Manual announcement: /wba announce <boss> [layer]
         local bossName = args[2]
         local layer = args[3] or "1"
 
         if not bossName then
-            print("|cff00ff00[DiscordBridge]|r Usage: /wb announce <boss> [layer]")
-            print("  Example: /wb announce kazzak 1")
+            print("|cff00ff00[DiscordBridge]|r Usage: /wba announce <boss> [layer]")
+            print("  Example: /wba announce kazzak 1")
             print("  Bosses: kazzak, doomwalker")
             return
         end
@@ -326,22 +326,21 @@ local function SlashHandler(msg)
 
     else
         print("|cff00ff00[DiscordBridge]|r v" .. VERSION .. " - World Boss Announcer")
-        print("  /wb announce <boss> [layer] - Announce a boss sighting")
-        print("  /wb status - Show status")
-        print("  /wb flush - Clear message queue")
-        print("  /wb autoreload on/off - Toggle auto-reload")
-        print("  /wb interval <seconds> - Set auto-reload interval")
-        print("  /wb bosses on/off - Toggle boss yell monitoring")
-        print("  /wb general on/off - Toggle general chat monitoring")
-        print("  /wb test - Send a test alert")
-        print("  /wb enable/disable - Enable or disable addon")
+        print("  /wba announce <boss> [layer] - Announce a boss sighting")
+        print("  /wba status - Show status")
+        print("  /wba flush - Clear message queue")
+        print("  /wba autoreload on/off - Toggle auto-reload")
+        print("  /wba interval <seconds> - Set auto-reload interval")
+        print("  /wba bosses on/off - Toggle boss yell monitoring")
+        print("  /wba general on/off - Toggle general chat monitoring")
+        print("  /wba test - Send a test alert")
+        print("  /wba enable/disable - Enable or disable addon")
     end
 end
 
 -- Register slash commands
 SLASH_DISCORDBRIDGE1 = "/discordbridge"
-SLASH_DISCORDBRIDGE2 = "/wb"
-SLASH_DISCORDBRIDGE3 = "/wba"  -- World Boss Announcer
+SLASH_DISCORDBRIDGE2 = "/wbaa"  -- World Boss Announcer
 SlashCmdList["DISCORDBRIDGE"] = SlashHandler
 
 -- Register events

@@ -20,7 +20,7 @@ A WoW Classic TBC Anniversary addon that detects world boss activity and forward
 
 - **Boss Yell Detection**: Automatically detects when Doom Lord Kazzak or Doomwalker yells (spawns)
 - **General Chat Monitoring**: Watches for players mentioning "kazzak" or "doomwalker" in General chat
-- **Manual Announcements**: Use `/wb announce` to report a boss sighting
+- **Manual Announcements**: Use `/wba announce` to report a boss sighting
 - **Auto-Reload**: Periodically reloads UI to flush alerts (configurable)
 
 ## Installation
@@ -77,23 +77,23 @@ The bridge must run on the same machine as WoW since it reads local SavedVariabl
 
 | Command | Description |
 |---------|-------------|
-| `/wb` | Show help |
-| `/wb announce <boss> [layer]` | Announce a boss sighting (auto-reloads UI) |
-| `/wb status` | Show queue and config status |
-| `/wb test` | Send a test alert |
-| `/wb flush` | Clear the message queue |
-| `/wb autoreload on/off` | Toggle auto-reload (default: on) |
-| `/wb interval <seconds>` | Set auto-reload interval (default: 120s) |
-| `/wb bosses on/off` | Toggle boss yell monitoring |
-| `/wb general on/off` | Toggle general chat monitoring |
-| `/wb enable/disable` | Enable or disable the addon |
+| `/wba` | Show help |
+| `/wba announce <boss> [layer]` | Announce a boss sighting (auto-reloads UI) |
+| `/wba status` | Show queue and config status |
+| `/wba test` | Send a test alert |
+| `/wba flush` | Clear the message queue |
+| `/wba autoreload on/off` | Toggle auto-reload (default: on) |
+| `/wba interval <seconds>` | Set auto-reload interval (default: 120s) |
+| `/wba bosses on/off` | Toggle boss yell monitoring |
+| `/wba general on/off` | Toggle general chat monitoring |
+| `/wba enable/disable` | Enable or disable the addon |
 
 ### Examples
 
 ```
-/wb announce kazzak 1      -- Announce Kazzak on Layer 1
-/wb announce doomwalker 2  -- Announce Doomwalker on Layer 2
-/wb status                 -- Check how many alerts are queued
+/wba announce kazzak 1      -- Announce Kazzak on Layer 1
+/wba announce doomwalker 2  -- Announce Doomwalker on Layer 2
+/wba status                 -- Check how many alerts are queued
 ```
 
 ## Alert Types
@@ -101,7 +101,7 @@ The bridge must run on the same machine as WoW since it reads local SavedVariabl
 | Type | Trigger | Discord Message |
 |------|---------|-----------------|
 | **BOSS_YELL** | Boss yells in-game | `@everyone 🚨 WORLD BOSS SPOTTED: Doom Lord Kazzak` |
-| **PLAYER_ANNOUNCE** | `/wb announce` command | `@everyone 🚨 WORLD BOSS UP: Doom Lord Kazzak - Layer 1` |
+| **PLAYER_ANNOUNCE** | `/wba announce` command | `@everyone 🚨 WORLD BOSS UP: Doom Lord Kazzak - Layer 1` |
 | **PLAYER_REPORT** | "kazzak" mentioned in General | `👀 Player Report (KAZZAK)` |
 
 ## Bot Setup
@@ -127,7 +127,7 @@ The SavedVariables file is only created after:
 
 ### Testing the connection
 
-1. In-game: `/wb test` then `/reload`
+1. In-game: `/wba test` then `/reload`
 2. Check bridge.py console for `[ALERT] TEST`
 3. Verify message appears in Discord
 
