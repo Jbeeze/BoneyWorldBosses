@@ -1,31 +1,44 @@
-# World Boss Announcer
+# World Boss Announcer v2
 
 A WoW Classic TBC Anniversary addon that detects world boss activity and forwards alerts to Discord via the [WorldBossTracker](https://github.com/Jbeeze/WorldBossTrackerDiscordBot) bot.
+
+**Real-time alerts with no /reload required!**
 
 ## How It Works
 
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐     ┌─────────┐
-│  WoW Addon      │ ──► │  SavedVariables  │ ──► │  bridge.py      │ ──► │  Bot    │ ──► Discord
-│  (in-game)      │     │  (local file)    │     │  (local script) │     │ (Render)│
+│  WoW Engine     │ ──► │  WoWChatLog.txt  │ ──► │  bridge.py      │ ──► │  Bot    │ ──► Discord
+│  (live logging) │     │  (real-time)     │     │  (tail -f)      │     │ (Render)│
 └─────────────────┘     └──────────────────┘     └─────────────────┘     └─────────┘
 ```
 
-1. **WoW Addon** captures boss yells and general chat mentions, stores them in SavedVariables
-2. **bridge.py** polls the SavedVariables file every 5 seconds
-3. New alerts are POSTed to the **WorldBossTracker bot** API
-4. Bot posts formatted messages to your **Discord** channel
+1. **WoW Engine** writes chat to log file when logging is enabled
+2. **Addon** controls `LoggingChat(true/false)` - auto-enabled on load
+3. **bridge.py** tails the log file, detects boss patterns, POSTs to bot API
+4. **Bot** sends formatted messages to Discord
 
 ## Features
 
+- **Real-Time Alerts**: No more `/reload` required - alerts within ~1 second
 - **Boss Yell Detection**: Automatically detects when Doom Lord Kazzak or Doomwalker yells (spawns)
 - **Guild Chat Monitoring**: Watches for "Kazzak up L1", "Kazz up L2", "Doomwalker up L1" patterns
 - **Whisper Monitoring**: Same patterns via whisper, supports `[TEST]` prefix for no-ping testing
-- **Manual Announcements**: Use `/wba announce` to report a boss sighting
+- **Simple Addon**: Just enables/disables WoW's built-in chat logging
 
 ## Installation
 
-### 1. Install the WoW Addon
+### 1. Initial Setup (One Time)
+
+Before the addon can work, you need to initialize the chat log file:
+
+1. Open WoW
+2. Type `/chatlog` in the chat window
+3. You should see: "Combat being logged to Logs\WoWChatLog.txt"
+
+This creates the log file that the bridge will tail. You only need to do this once.
+
+### 2. Install the WoW Addon
 
 Copy the addon files to your WoW Classic AddOns folder:
 
@@ -41,7 +54,7 @@ cd "/path/to/WoW/_classic_/Interface/AddOns"
 git clone https://github.com/Jbeeze/WorldBossAnnouncer.git WorldBossAnnouncer
 ```
 
-### 2. Configure the Python Bridge
+### 3. Configure the Python Bridge
 
 Install dependencies:
 ```bash
@@ -54,54 +67,58 @@ CONFIG = {
     # Your WorldBossTracker bot URL
     "BOT_API_URL": "https://worldbosstrackerdiscordbot.onrender.com",
 
-    # Path to SavedVariables file
-    # macOS: /Applications/World of Warcraft/_classic_/WTF/Account/ACCOUNTNAME/SavedVariables/WorldBossAnnouncer.lua
-    # Windows: C:\Program Files\World of Warcraft\_classic_\WTF\Account\ACCOUNTNAME\SavedVariables\WorldBossAnnouncer.lua
-    "SV_PATH": "/path/to/WTF/Account/ACCOUNTNAME/SavedVariables/WorldBossAnnouncer.lua",
+    # Path to WoWChatLog.txt
+    # macOS: /Applications/World of Warcraft/_classic_/Logs/WoWChatLog.txt
+    # Windows: C:\Program Files\World of Warcraft\_classic_\Logs\WoWChatLog.txt
+    "CHAT_LOG_PATH": "/path/to/WoW/_classic_/Logs/WoWChatLog.txt",
 
-    # How often to check for new alerts (seconds)
-    "POLL_INTERVAL": 5,
+    # How often to check for new lines (seconds)
+    "POLL_INTERVAL": 1,
+
+    # Which chat channels to watch
+    "CHANNEL_FILTER": ["guild", "whisper", "yell"],
 }
 ```
 
-### 3. Run the Bridge
+### 4. Run the Bridge
 
 Run while playing WoW:
 ```bash
 python bridge.py
 ```
 
-The bridge must run on the same machine as WoW since it reads local SavedVariables.
+The bridge must run on the same machine as WoW since it reads local log files.
 
 ## In-Game Commands
 
 | Command | Description |
 |---------|-------------|
 | `/wba` | Show help |
-| `/wba announce <boss> [layer]` | Announce a boss sighting |
-| `/wba status` | Show queue and config status |
-| `/wba test` | Send a test alert |
-| `/wba flush` | Clear the message queue |
-| `/wba bosses on/off` | Toggle boss yell monitoring |
-| `/wba guild on/off` | Toggle guild chat monitoring |
-| `/wba whisper on/off` | Toggle whisper monitoring |
-| `/wba enable/disable` | Enable or disable the addon |
+| `/wba logging on` | Enable chat logging |
+| `/wba logging off` | Disable chat logging |
+| `/wba status` | Show logging status |
 
-### Examples
-
-```
-/wba announce kazzak 1      -- Announce Kazzak on Layer 1
-/wba announce doomwalker 2  -- Announce Doomwalker on Layer 2
-/wba status                 -- Check how many alerts are queued
-```
+The addon auto-enables logging when you log in, so you typically don't need to run any commands.
 
 ## Alert Types
 
 | Type | Trigger | Discord Message |
 |------|---------|-----------------|
-| **BOSS_YELL** | Boss yells in-game | `@everyone 🚨 WORLD BOSS SPOTTED: Doom Lord Kazzak` |
-| **PLAYER_ANNOUNCE** | `/wba announce` command | `@everyone 🚨 WORLD BOSS UP: Doom Lord Kazzak - Layer 1` |
-| **PLAYER_REPORT** | "kazzak" mentioned in General | `👀 Player Report (KAZZAK)` |
+| **BOSS_YELL** | Boss yells in-game | `@everyone WORLD BOSS SPOTTED: Doom Lord Kazzak` |
+| **GUILD_REPORT** | "kazzak up L1" in guild chat | `@everyone WORLD BOSS UP: Doom Lord Kazzak - Layer 1` |
+| **WHISPER_REPORT** | "kazzak up L1" via whisper | Same as guild report |
+| **WHISPER_TEST** | "[TEST] kazzak up L1" via whisper | Test alert (no @everyone ping) |
+
+## Testing
+
+1. Login to WoW - addon auto-enables logging
+2. Start `python bridge.py`
+3. Have someone type in guild chat: "Kazzak up L1"
+4. Verify alert appears in Discord within ~1 second
+5. Run `/wba logging off` and verify no more alerts
+6. Run `/wba logging on` and verify alerts resume
+
+To test without pinging everyone, whisper yourself with: `[TEST] Kazzak up L1`
 
 ## Bot Setup
 
@@ -114,21 +131,20 @@ Make sure your bot has the `CHANNEL_IDS` environment variable set to the Discord
 ### Alerts not appearing in Discord
 
 1. Check that `bridge.py` is running
-2. Verify the `SV_PATH` points to the correct SavedVariables file
-3. Ensure the bot is running and connected to Discord
-4. Check the bridge console for errors
+2. Verify `CHAT_LOG_PATH` points to the correct log file
+3. Ensure chat logging is enabled (`/wba status`)
+4. Ensure the bot is running and connected to Discord
+5. Check the bridge console for errors
 
-### SavedVariables file not found
+### Log file not found
 
-The SavedVariables file is only created after:
-1. Logging into a character with the addon enabled
-2. Running `/reload` or logging out
+1. Run `/chatlog` in WoW to initialize the file
+2. Verify `WoWChatLog.txt` exists in `_classic_/Logs/`
+3. Make sure the path in `bridge.py` is correct
 
-### Testing the connection
+### Bridge restarts reading old messages
 
-1. In-game: `/wba test` then `/reload`
-2. Check bridge.py console for `[ALERT] TEST`
-3. Verify message appears in Discord
+The bridge saves its position in `bridge_state.json`. On restart, it resumes from where it left off. If you want to start fresh, delete `bridge_state.json`.
 
 ## File Structure
 
@@ -136,10 +152,20 @@ The SavedVariables file is only created after:
 WorldBossAnnouncer/
 ├── WorldBossAnnouncer.toc    # Addon metadata (Interface 20504)
 ├── WorldBossAnnouncer.lua    # Main addon code
-├── bridge.py            # Python bridge script
-├── requirements.txt     # Python dependencies
+├── bridge.py                 # Python bridge script
+├── requirements.txt          # Python dependencies
+├── bridge_state.json         # Bridge position state (auto-created)
 └── README.md
 ```
+
+## v1 vs v2 Comparison
+
+| Aspect | v1 (SavedVariables) | v2 (Log Tailing) |
+|--------|---------------------|------------------|
+| Latency | Requires /reload | ~1 second |
+| User Action | Click reload popup | None |
+| Addon Complexity | Event capture + queue | Simple on/off |
+| File Size | Queue capped at 200 | Log grows but bridge ignores history |
 
 ## License
 

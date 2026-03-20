@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-World Boss Announcer - Discord Bridge
-Polls WoW SavedVariables for Kazzak/Doomwalker alerts and posts to Discord bot.
-Target: TBC Anniversary addon (DiscordBridge)
+World Boss Announcer - Discord Bridge v2
+Tails WoWChatLog.txt for Kazzak/Doomwalker alerts and posts to Discord bot.
+Real-time alerts with no /reload required!
 """
 
 import json
@@ -23,195 +23,152 @@ CONFIG = {
     # Render: https://worldbosstrackerdiscordbot.onrender.com
     "BOT_API_URL": "https://worldbosstrackerdiscordbot.onrender.com",
 
-    # Path to SavedVariables file (required)
-    # macOS: /Applications/World of Warcraft/_classic_/WTF/Account/ACCOUNTNAME/SavedVariables/WorldBossAnnouncer.lua
-    # Windows: Use forward slashes OR raw string to avoid escape issues:
-    #   "F:/Games/World of Warcraft/_anniversary_/WTF/Account/12345678#1/SavedVariables/WorldBossAnnouncer.lua"
-    #   or r"F:\Games\World of Warcraft\_anniversary_\WTF\Account\12345678#1\SavedVariables\WorldBossAnnouncer.lua"
-    "SV_PATH": "",
+    # Path to WoWChatLog.txt
+    # macOS: /Applications/World of Warcraft/_classic_/Logs/WoWChatLog.txt
+    # Windows: C:\Program Files\World of Warcraft\_classic_\Logs\WoWChatLog.txt
+    "CHAT_LOG_PATH": "",
 
-    # Seconds between polling checks
-    "POLL_INTERVAL": 5,
+    # Seconds between checking for new log lines
+    "POLL_INTERVAL": 1,
 
-    # Filter which channels to forward (empty list = all)
-    # Options: boss_yell, announce, guild, whisper, test
-    "CHANNEL_FILTER": ["boss_yell", "announce", "guild", "whisper", "test"],
+    # Which chat channels to watch (lowercase)
+    # Options: guild, whisper, yell, say, party, raid
+    "CHANNEL_FILTER": ["guild", "whisper", "yell"],
 }
 
 # State file path (same directory as this script)
 STATE_FILE = Path(__file__).parent / "bridge_state.json"
 
+# =============================================================================
+# BOSS DETECTION PATTERNS
+# =============================================================================
+
+# World bosses we care about
+WORLD_BOSSES = {
+    "Doom Lord Kazzak": ["doom lord kazzak", "kazzak"],
+    "Doomwalker": ["doomwalker"],
+}
+
+# Guild/whisper patterns: "Kazzak up L1", "Kazz up L2", "Doomwalker up L1", etc.
+# Returns (boss_name, layer) if matched
+BOSS_PATTERNS = [
+    (re.compile(r"[Kk]azzak\s+up\s+[Ll](\d+)", re.IGNORECASE), "Doom Lord Kazzak"),
+    (re.compile(r"[Kk]azz\s+up\s+[Ll](\d+)", re.IGNORECASE), "Doom Lord Kazzak"),
+    (re.compile(r"[Dd]oomwalker\s+up\s+[Ll](\d+)", re.IGNORECASE), "Doomwalker"),
+]
 
 # =============================================================================
-# LUA PARSER - Regex-based parser for SavedVariables
+# CHAT LOG PARSING
 # =============================================================================
 
-def parse_lua_value(content: str, pos: int) -> tuple:
-    """Parse a Lua value starting at position pos. Returns (value, new_pos)."""
-    # Skip whitespace
-    while pos < len(content) and content[pos] in ' \t\n\r':
-        pos += 1
+# Chat log line format:
+# 11/5 20:34:12.442  [Guild] Thrall: Kazzak up L1
+# 11/5 20:34:18.330  Sylvanas whispers: Doomwalker up L2
+# 11/5 20:34:25.100  [Yell] Doom Lord Kazzak: <boss yell text>
 
-    if pos >= len(content):
-        return None, pos
-
-    char = content[pos]
-
-    # String (double quote)
-    if char == '"':
-        end = pos + 1
-        while end < len(content):
-            if content[end] == '\\' and end + 1 < len(content):
-                end += 2
-                continue
-            if content[end] == '"':
-                break
-            end += 1
-        # Decode escape sequences
-        raw = content[pos + 1:end]
-        try:
-            value = raw.encode().decode('unicode_escape')
-        except:
-            value = raw
-        return value, end + 1
-
-    # String (single quote)
-    if char == "'":
-        end = pos + 1
-        while end < len(content):
-            if content[end] == '\\' and end + 1 < len(content):
-                end += 2
-                continue
-            if content[end] == "'":
-                break
-            end += 1
-        raw = content[pos + 1:end]
-        try:
-            value = raw.encode().decode('unicode_escape')
-        except:
-            value = raw
-        return value, end + 1
-
-    # Table
-    if char == '{':
-        return parse_lua_table(content, pos)
-
-    # Boolean/nil
-    if content[pos:pos+4] == 'true':
-        return True, pos + 4
-    if content[pos:pos+5] == 'false':
-        return False, pos + 5
-    if content[pos:pos+3] == 'nil':
-        return None, pos + 3
-
-    # Number
-    num_match = re.match(r'-?\d+\.?\d*', content[pos:])
-    if num_match:
-        num_str = num_match.group()
-        if '.' in num_str:
-            return float(num_str), pos + len(num_str)
-        return int(num_str), pos + len(num_str)
-
-    return None, pos
+LOG_LINE_PATTERNS = {
+    # [Guild] PlayerName: message
+    "guild": re.compile(r"^\d+/\d+\s+[\d:.]+\s+\[Guild\]\s+([^:]+):\s+(.+)$"),
+    # PlayerName whispers: message
+    "whisper": re.compile(r"^\d+/\d+\s+[\d:.]+\s+([^\s]+)\s+whispers:\s+(.+)$"),
+    # [Yell] PlayerName: message (or boss name)
+    "yell": re.compile(r"^\d+/\d+\s+[\d:.]+\s+\[Yell\]\s+([^:]+):\s+(.+)$"),
+    # [Say] PlayerName: message
+    "say": re.compile(r"^\d+/\d+\s+[\d:.]+\s+\[Say\]\s+([^:]+):\s+(.+)$"),
+    # [Party] PlayerName: message
+    "party": re.compile(r"^\d+/\d+\s+[\d:.]+\s+\[Party\]\s+([^:]+):\s+(.+)$"),
+    # [Raid] PlayerName: message
+    "raid": re.compile(r"^\d+/\d+\s+[\d:.]+\s+\[Raid\]\s+([^:]+):\s+(.+)$"),
+}
 
 
-def parse_lua_table(content: str, pos: int) -> tuple:
-    """Parse a Lua table starting at position pos. Returns (table_dict, new_pos)."""
-    if content[pos] != '{':
-        return None, pos
+def parse_log_line(line: str) -> dict | None:
+    """
+    Parse a chat log line and return structured data if it matches a watched channel.
+    Returns: {"channel": str, "author": str, "message": str} or None
+    """
+    line = line.strip()
+    if not line:
+        return None
 
-    pos += 1
-    result = {}
-    array_index = 1
+    for channel, pattern in LOG_LINE_PATTERNS.items():
+        match = pattern.match(line)
+        if match:
+            return {
+                "channel": channel,
+                "author": match.group(1).strip(),
+                "message": match.group(2).strip(),
+            }
 
-    while pos < len(content):
-        # Skip whitespace and commas
-        while pos < len(content) and content[pos] in ' \t\n\r,':
-            pos += 1
-
-        if pos >= len(content):
-            break
-
-        # End of table
-        if content[pos] == '}':
-            return result, pos + 1
-
-        # Check for key assignment
-        # [key] = value or key = value
-        if content[pos] == '[':
-            # Bracketed key
-            end_bracket = content.find(']', pos)
-            if end_bracket == -1:
-                break
-            key_content = content[pos + 1:end_bracket].strip()
-            if key_content.startswith('"') or key_content.startswith("'"):
-                key = key_content[1:-1]
-            else:
-                try:
-                    key = int(key_content)
-                except:
-                    key = key_content
-            pos = end_bracket + 1
-            # Skip whitespace and =
-            while pos < len(content) and content[pos] in ' \t\n\r':
-                pos += 1
-            if pos < len(content) and content[pos] == '=':
-                pos += 1
-            value, pos = parse_lua_value(content, pos)
-            result[key] = value
-        elif re.match(r'[a-zA-Z_]', content[pos:pos+1]):
-            # Named key
-            key_match = re.match(r'([a-zA-Z_][a-zA-Z0-9_]*)', content[pos:])
-            if key_match:
-                key = key_match.group(1)
-                pos += len(key)
-                # Skip whitespace
-                while pos < len(content) and content[pos] in ' \t\n\r':
-                    pos += 1
-                if pos < len(content) and content[pos] == '=':
-                    pos += 1
-                    value, pos = parse_lua_value(content, pos)
-                    result[key] = value
-                else:
-                    # It's an array value that happens to look like a key
-                    result[array_index] = key
-                    array_index += 1
-        else:
-            # Array value
-            value, pos = parse_lua_value(content, pos)
-            if value is not None:
-                result[array_index] = value
-                array_index += 1
-
-    return result, pos
+    return None
 
 
-def parse_lua_savedvars(filepath: str) -> dict:
-    """Parse a WoW SavedVariables Lua file and return as Python dict."""
-    with open(filepath, 'r', encoding='utf-8') as f:
-        content = f.read()
+def check_boss_pattern(message: str) -> tuple | None:
+    """
+    Check if message matches a boss announcement pattern.
+    Returns: (boss_name, layer) or None
+    """
+    for pattern, boss_name in BOSS_PATTERNS:
+        match = pattern.search(message)
+        if match:
+            layer = match.group(1)
+            return (boss_name, layer)
+    return None
 
-    result = {}
 
-    # Find all top-level assignments like: VariableName = { ... }
-    pattern = r'([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*'
+def check_boss_yell(author: str) -> str | None:
+    """
+    Check if the author is a world boss (for yell detection).
+    Returns: boss_name or None
+    """
+    author_lower = author.lower()
+    for boss_name, aliases in WORLD_BOSSES.items():
+        for alias in aliases:
+            if alias in author_lower:
+                return boss_name
+    return None
 
-    pos = 0
-    while pos < len(content):
-        match = re.search(pattern, content[pos:])
-        if not match:
-            break
 
-        var_name = match.group(1)
-        value_start = pos + match.end()
+def is_test_message(message: str) -> bool:
+    """Check if message has [TEST] prefix."""
+    return message.strip().upper().startswith("[TEST]")
 
-        value, new_pos = parse_lua_value(content, value_start)
-        if value is not None:
-            result[var_name] = value
 
-        pos = new_pos if new_pos > pos else pos + match.end()
+def clean_test_prefix(message: str) -> str:
+    """Remove [TEST] prefix from message."""
+    return re.sub(r"^\[TEST\]\s*", "", message, flags=re.IGNORECASE)
 
-    return result
+
+# =============================================================================
+# BOT API
+# =============================================================================
+
+def post_to_bot(alert: dict) -> bool:
+    """Post alert to bot API. Returns True on success."""
+    if not CONFIG["BOT_API_URL"]:
+        print("[ERROR] No bot API URL configured!")
+        return False
+
+    api_url = CONFIG["BOT_API_URL"].rstrip("/") + "/webhook/alert"
+
+    try:
+        response = requests.post(api_url, json=alert, timeout=10)
+
+        if response.status_code == 503:
+            print("[ERROR] Bot not connected to Discord yet")
+            return False
+
+        if response.status_code not in (200, 201):
+            print(f"[ERROR] Bot API returned {response.status_code}: {response.text}")
+            return False
+
+        result = response.json()
+        print(f"[BOT] Alert sent to {result.get('channelsSent', 0)} channel(s)")
+        return True
+
+    except requests.RequestException as e:
+        print(f"[ERROR] Network error: {e}")
+        return False
 
 
 # =============================================================================
@@ -222,161 +179,199 @@ def load_state() -> dict:
     """Load the bridge state from file."""
     if STATE_FILE.exists():
         try:
-            with open(STATE_FILE, 'r') as f:
+            with open(STATE_FILE, "r") as f:
                 return json.load(f)
         except (json.JSONDecodeError, IOError):
             pass
-    return {"last_sent_id": 0}
+    return {"last_inode": 0, "last_pos": 0}
 
 
 def save_state(state: dict) -> None:
     """Save the bridge state to file."""
-    with open(STATE_FILE, 'w') as f:
+    with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
 
 
 # =============================================================================
-# BOT API
+# FILE TAILING
 # =============================================================================
 
-def post_to_bot(entries: list) -> bool:
-    """Post entries to bot API. Returns True on success."""
-    if not CONFIG["BOT_API_URL"]:
-        print("[ERROR] No bot API URL configured!")
-        return False
+def get_file_info(path: str) -> tuple:
+    """Get inode and size of file. Returns (inode, size) or (0, 0) if not found."""
+    try:
+        stat = os.stat(path)
+        return (stat.st_ino, stat.st_size)
+    except OSError:
+        return (0, 0)
 
-    if not entries:
-        return True
 
-    api_url = CONFIG["BOT_API_URL"].rstrip("/") + "/webhook/alert"
+def tail_log_file():
+    """
+    Generator that yields new lines from the chat log file.
+    Handles file rotation (WoW recreates file on reload/relog).
+    """
+    log_path = CONFIG["CHAT_LOG_PATH"]
+    state = load_state()
 
-    # Process each entry
-    for entry in entries:
-        # Build payload matching what the bot expects
-        payload = {
-            "alertType": entry.get("alertType", ""),
-            "author": entry.get("author", "Unknown"),
-            "msg": entry.get("msg", ""),
-            "channel": entry.get("channel", ""),
-            "zone": entry.get("zone", ""),
-            "subzone": entry.get("subzone", ""),
-            "keyword": entry.get("keyword", ""),
-            "boss": entry.get("boss", ""),
-            "layer": entry.get("layer", ""),
-        }
+    last_inode = state.get("last_inode", 0)
+    last_pos = state.get("last_pos", 0)
 
+    print(f"[TAIL] Starting from position {last_pos}")
+
+    file_handle = None
+
+    while True:
         try:
-            response = requests.post(api_url, json=payload, timeout=10)
+            # Check if file exists
+            if not os.path.exists(log_path):
+                if file_handle:
+                    file_handle.close()
+                    file_handle = None
+                time.sleep(CONFIG["POLL_INTERVAL"])
+                continue
 
-            if response.status_code == 503:
-                print("[ERROR] Bot not connected to Discord yet")
-                return False
+            # Get current file info
+            current_inode, current_size = get_file_info(log_path)
 
-            if response.status_code not in (200, 201):
-                print(f"[ERROR] Bot API returned {response.status_code}: {response.text}")
-                return False
+            # Detect file rotation (inode changed or file shrunk)
+            file_rotated = False
+            if current_inode != last_inode:
+                print(f"[TAIL] File rotated (inode changed: {last_inode} -> {current_inode})")
+                file_rotated = True
+            elif current_size < last_pos:
+                print(f"[TAIL] File rotated (size shrunk: {last_pos} -> {current_size})")
+                file_rotated = True
 
-            result = response.json()
-            print(f"[BOT] Alert sent to {result.get('channelsSent', 0)} channel(s)")
+            # Reopen file if rotated or not open
+            if file_rotated or file_handle is None:
+                if file_handle:
+                    file_handle.close()
 
-            # Small delay between messages
-            time.sleep(0.3)
+                file_handle = open(log_path, "r", encoding="utf-8", errors="replace")
 
-        except requests.RequestException as e:
-            print(f"[ERROR] Network error: {e}")
-            return False
+                if file_rotated:
+                    # Start from beginning of new file, but skip to end to ignore history
+                    file_handle.seek(0, 2)  # Seek to end
+                    last_pos = file_handle.tell()
+                    print(f"[TAIL] Reopened file, starting from end (pos {last_pos})")
+                else:
+                    # Resume from last known position
+                    file_handle.seek(last_pos)
+                    print(f"[TAIL] Resumed from position {last_pos}")
 
-    return True
+                last_inode = current_inode
+
+                # Save state
+                state["last_inode"] = last_inode
+                state["last_pos"] = last_pos
+                save_state(state)
+
+            # Read new lines
+            while True:
+                line = file_handle.readline()
+                if line:
+                    last_pos = file_handle.tell()
+                    yield line
+                else:
+                    break
+
+            # Save position periodically
+            state["last_pos"] = last_pos
+            save_state(state)
+
+            time.sleep(CONFIG["POLL_INTERVAL"])
+
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            print(f"[ERROR] Tail error: {e}")
+            if file_handle:
+                file_handle.close()
+                file_handle = None
+            time.sleep(CONFIG["POLL_INTERVAL"])
 
 
 # =============================================================================
 # MAIN LOOP
 # =============================================================================
 
+def process_line(line: str) -> None:
+    """Process a single log line and send alerts if needed."""
+    parsed = parse_log_line(line)
+    if not parsed:
+        return
+
+    channel = parsed["channel"]
+    author = parsed["author"]
+    message = parsed["message"]
+
+    # Check channel filter
+    if CONFIG["CHANNEL_FILTER"] and channel not in CONFIG["CHANNEL_FILTER"]:
+        return
+
+    # Check for test message
+    is_test = is_test_message(message)
+    if is_test:
+        message = clean_test_prefix(message)
+
+    # Check for boss yell (boss speaking)
+    if channel == "yell":
+        boss_name = check_boss_yell(author)
+        if boss_name:
+            print(f"[ALERT] BOSS_YELL: {boss_name} yelled!")
+            alert = {
+                "alertType": "BOSS_YELL",
+                "author": author,
+                "msg": message,
+                "channel": "boss_yell",
+                "boss": boss_name,
+                "layer": "?",
+            }
+            post_to_bot(alert)
+            return
+
+    # Check for boss announcement patterns in guild/whisper/yell
+    result = check_boss_pattern(message)
+    if result:
+        boss_name, layer = result
+
+        alert_type = "WHISPER_TEST" if is_test and channel == "whisper" else (
+            "WHISPER_REPORT" if channel == "whisper" else "GUILD_REPORT"
+        )
+
+        formatted_msg = f"{boss_name} UP Layer {layer}"
+        if is_test:
+            formatted_msg = f"[TEST] {formatted_msg}"
+
+        print(f"[ALERT] {alert_type}: {author} reports {boss_name} L{layer}")
+
+        alert = {
+            "alertType": alert_type,
+            "author": author,
+            "msg": formatted_msg,
+            "channel": channel,
+            "boss": boss_name,
+            "layer": layer,
+            "reporter": author,
+        }
+        post_to_bot(alert)
+
+
 def main_loop() -> None:
-    """Main polling loop."""
-    print(f"[WorldBossAnnouncer] Starting bridge...")
+    """Main processing loop."""
+    print(f"[WorldBossAnnouncer] Starting bridge v2 (log tailing)...")
     print(f"  Bot API: {CONFIG['BOT_API_URL']}")
-    print(f"  SavedVariables: {CONFIG['SV_PATH']}")
+    print(f"  Chat log: {CONFIG['CHAT_LOG_PATH']}")
     print(f"  Poll interval: {CONFIG['POLL_INTERVAL']}s")
+    print(f"  Watching channels: {', '.join(CONFIG['CHANNEL_FILTER'])}")
     print(f"  Watching for: Kazzak, Doomwalker")
     print()
 
-    state = load_state()
-    print(f"[STATE] Last sent ID: {state['last_sent_id']}")
-
-    while True:
-        try:
-            # Check if file exists
-            if not os.path.exists(CONFIG["SV_PATH"]):
-                # Silent wait - file might not exist yet
-                time.sleep(CONFIG["POLL_INTERVAL"])
-                continue
-
-            # Parse SavedVariables
-            try:
-                data = parse_lua_savedvars(CONFIG["SV_PATH"])
-            except Exception as e:
-                print(f"[ERROR] Failed to parse SavedVariables: {e}")
-                time.sleep(CONFIG["POLL_INTERVAL"])
-                continue
-
-            # Get queue from parsed data
-            db = data.get("WorldBossAnnouncerDB", {})
-            queue = db.get("queue", {})
-
-            # Convert queue dict to sorted list (Lua arrays are 1-indexed dicts)
-            if isinstance(queue, dict):
-                queue_list = [queue[k] for k in sorted(queue.keys()) if isinstance(queue[k], dict)]
-            else:
-                queue_list = []
-
-            if not queue_list:
-                time.sleep(CONFIG["POLL_INTERVAL"])
-                continue
-
-            # Filter new entries
-            last_id = state["last_sent_id"]
-            new_entries = [
-                entry for entry in queue_list
-                if entry.get("id", 0) > last_id
-            ]
-
-            # Apply channel filter
-            if CONFIG["CHANNEL_FILTER"]:
-                new_entries = [
-                    entry for entry in new_entries
-                    if entry.get("channel", "").lower() in CONFIG["CHANNEL_FILTER"]
-                ]
-
-            if not new_entries:
-                time.sleep(CONFIG["POLL_INTERVAL"])
-                continue
-
-            # Sort by ID to ensure order
-            new_entries.sort(key=lambda x: x.get("id", 0))
-
-            # Log what we found
-            for entry in new_entries:
-                alert_type = entry.get("alertType", "UNKNOWN")
-                author = entry.get("author", "?")
-                print(f"[ALERT] {alert_type}: {author}")
-
-            # Post to bot
-            if post_to_bot(new_entries):
-                # Update state with highest ID sent
-                max_id = max(entry.get("id", 0) for entry in new_entries)
-                state["last_sent_id"] = max_id
-                save_state(state)
-                print(f"[SENT] {len(new_entries)} alert(s), last ID: {max_id}")
-
-        except KeyboardInterrupt:
-            print("\n[SHUTDOWN] Received interrupt, exiting...")
-            break
-        except Exception as e:
-            print(f"[ERROR] Unexpected error: {e}")
-
-        time.sleep(CONFIG["POLL_INTERVAL"])
+    try:
+        for line in tail_log_file():
+            process_line(line)
+    except KeyboardInterrupt:
+        print("\n[SHUTDOWN] Received interrupt, exiting...")
 
 
 def validate_config() -> bool:
@@ -386,8 +381,8 @@ def validate_config() -> bool:
     if not CONFIG["BOT_API_URL"]:
         errors.append("BOT_API_URL is not set")
 
-    if not CONFIG["SV_PATH"]:
-        errors.append("SV_PATH is not set")
+    if not CONFIG["CHAT_LOG_PATH"]:
+        errors.append("CHAT_LOG_PATH is not set")
 
     if errors:
         print("[CONFIG ERROR] Please fix the following issues:")
@@ -402,9 +397,9 @@ def validate_config() -> bool:
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("  World Boss Announcer - Bridge v1.0")
+    print("  World Boss Announcer - Bridge v2.0")
+    print("  Real-time log tailing (no /reload needed!)")
     print("  Watches for Kazzak/Doomwalker alerts")
-    print("  Posts to WorldBossTracker bot")
     print("=" * 60)
     print()
 
