@@ -37,6 +37,19 @@ local CHANNEL_LABELS = {
 local frame = CreateFrame("Frame")
 local autoReloadTicker = nil
 
+-- Popup dialog for reload confirmation (required for protected function)
+StaticPopupDialogs["WORLDBOSSANNOUNCER_RELOAD"] = {
+    text = "World Boss Announcer: Alert queued. Reload UI to send?",
+    button1 = "Reload",
+    button2 = "Later",
+    OnAccept = function()
+        ReloadUI()
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+}
+
 -- Initialize saved variables
 local function InitializeDB()
     if not WorldBossAnnouncerDB then
@@ -278,21 +291,8 @@ local function SlashHandler(msg)
         QueueMessage("TEST", playerName, "Test alert - Discord connection working!", "test", {
             alertType = "TEST",
         })
-        print("|cff00ff00[WorldBossAnnouncer]|r Testing Discord connection...")
-
-        -- Reload UI to send the test immediately (if not in combat)
-        if InCombatLockdown() then
-            print("|cffff0000[WorldBossAnnouncer]|r In combat - will reload after combat ends.")
-            local combatFrame = CreateFrame("Frame")
-            combatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-            combatFrame:SetScript("OnEvent", function(self)
-                self:UnregisterAllEvents()
-                print("|cff00ff00[WorldBossAnnouncer]|r Combat ended, reloading...")
-                C_Timer.After(1, ReloadUI)
-            end)
-        else
-            C_Timer.After(1, ReloadUI)
-        end
+        print("|cff00ff00[WorldBossAnnouncer]|r Test alert queued.")
+        StaticPopup_Show("WORLDBOSSANNOUNCER_RELOAD")
 
     elseif cmd == "announce" then
         -- Manual announcement: /wba announce <boss> [layer]
@@ -332,21 +332,7 @@ local function SlashHandler(msg)
 
         print("|cffff0000[WORLD BOSS]|r Announced: " .. fullBossName .. " Layer " .. layer)
         PlaySound(8959) -- RAID_WARNING sound
-
-        -- Reload UI to send the alert (if not in combat)
-        if InCombatLockdown() then
-            print("|cffff0000[WorldBossAnnouncer]|r In combat - will reload after combat ends.")
-            local combatFrame = CreateFrame("Frame")
-            combatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-            combatFrame:SetScript("OnEvent", function(self)
-                self:UnregisterAllEvents()
-                print("|cff00ff00[WorldBossAnnouncer]|r Combat ended, reloading...")
-                C_Timer.After(1, ReloadUI)
-            end)
-        else
-            print("|cff00ff00[WorldBossAnnouncer]|r Reloading UI to send alert...")
-            C_Timer.After(1, ReloadUI)
-        end
+        StaticPopup_Show("WORLDBOSSANNOUNCER_RELOAD")
 
     else
         print("|cff00ff00[WorldBossAnnouncer]|r v" .. VERSION .. " - World Boss Announcer")
