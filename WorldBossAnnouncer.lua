@@ -1,8 +1,8 @@
--- DiscordBridge: World Boss Announcer for Discord
+-- WorldBossAnnouncer: World Boss Announcer for Discord
 -- Target: TBC Anniversary (Interface 20504)
 -- Detects Doom Lord Kazzak activity and forwards to Discord
 
-local ADDON_NAME = "DiscordBridge"
+local ADDON_NAME = "WorldBossAnnouncer"
 local VERSION = "1.0.0"
 
 -- World boss configuration
@@ -39,20 +39,20 @@ local autoReloadTicker = nil
 
 -- Initialize saved variables
 local function InitializeDB()
-    if not DiscordBridgeDB then
-        DiscordBridgeDB = {}
+    if not WorldBossAnnouncerDB then
+        WorldBossAnnouncerDB = {}
     end
 
-    if not DiscordBridgeDB.config then
-        DiscordBridgeDB.config = CopyTable(DEFAULT_CONFIG)
+    if not WorldBossAnnouncerDB.config then
+        WorldBossAnnouncerDB.config = CopyTable(DEFAULT_CONFIG)
     end
 
-    if not DiscordBridgeDB.queue then
-        DiscordBridgeDB.queue = {}
+    if not WorldBossAnnouncerDB.queue then
+        WorldBossAnnouncerDB.queue = {}
     end
 
-    if not DiscordBridgeDB.meta then
-        DiscordBridgeDB.meta = {
+    if not WorldBossAnnouncerDB.meta then
+        WorldBossAnnouncerDB.meta = {
             lastId = 0,
             playerName = UnitName("player"),
             realmName = GetRealmName(),
@@ -60,8 +60,8 @@ local function InitializeDB()
     end
 
     -- Update player info on each login
-    DiscordBridgeDB.meta.playerName = UnitName("player")
-    DiscordBridgeDB.meta.realmName = GetRealmName()
+    WorldBossAnnouncerDB.meta.playerName = UnitName("player")
+    WorldBossAnnouncerDB.meta.realmName = GetRealmName()
 end
 
 -- Check if message contains any watched keywords
@@ -77,14 +77,14 @@ end
 
 -- Add message to queue
 local function QueueMessage(event, author, msg, channel, extra)
-    if not DiscordBridgeDB.config.enabled then return end
+    if not WorldBossAnnouncerDB.config.enabled then return end
 
     -- Increment ID
-    DiscordBridgeDB.meta.lastId = DiscordBridgeDB.meta.lastId + 1
+    WorldBossAnnouncerDB.meta.lastId = WorldBossAnnouncerDB.meta.lastId + 1
 
     -- Create queue entry
     local entry = {
-        id = DiscordBridgeDB.meta.lastId,
+        id = WorldBossAnnouncerDB.meta.lastId,
         t = time(),
         event = event,
         author = author or "Unknown",
@@ -102,11 +102,11 @@ local function QueueMessage(event, author, msg, channel, extra)
     end
 
     -- Add to queue
-    table.insert(DiscordBridgeDB.queue, entry)
+    table.insert(WorldBossAnnouncerDB.queue, entry)
 
     -- Trim queue if over max
-    while #DiscordBridgeDB.queue > DiscordBridgeDB.config.maxQueue do
-        table.remove(DiscordBridgeDB.queue, 1)
+    while #WorldBossAnnouncerDB.queue > WorldBossAnnouncerDB.config.maxQueue do
+        table.remove(WorldBossAnnouncerDB.queue, 1)
     end
 
     -- Alert the player
@@ -121,16 +121,16 @@ local function OnEvent(self, event, ...)
         if addonName == ADDON_NAME then
             InitializeDB()
             SetupAutoReload()
-            print("|cff00ff00[DiscordBridge]|r World Boss Announcer loaded.")
-            print("|cff00ff00[DiscordBridge]|r Watching for: Doom Lord Kazzak, Doomwalker")
-            print("|cff00ff00[DiscordBridge]|r Type /discordbridge for commands.")
+            print("|cff00ff00[WorldBossAnnouncer]|r World Boss Announcer loaded.")
+            print("|cff00ff00[WorldBossAnnouncer]|r Watching for: Doom Lord Kazzak, Doomwalker")
+            print("|cff00ff00[WorldBossAnnouncer]|r Type /discordbridge for commands.")
         end
         return
     end
 
     -- Monster yell (world boss speaking)
     if event == "CHAT_MSG_MONSTER_YELL" then
-        if not DiscordBridgeDB.config.watchBossYells then return end
+        if not WorldBossAnnouncerDB.config.watchBossYells then return end
 
         local msg, mobName = ...
 
@@ -145,7 +145,7 @@ local function OnEvent(self, event, ...)
 
     -- General chat (channel chat)
     if event == "CHAT_MSG_CHANNEL" then
-        if not DiscordBridgeDB.config.watchGeneralChat then return end
+        if not WorldBossAnnouncerDB.config.watchGeneralChat then return end
 
         local msg, author, _, _, _, _, _, channelIndex, channelName = ...
 
@@ -177,14 +177,14 @@ function SetupAutoReload()
         autoReloadTicker = nil
     end
 
-    if not DiscordBridgeDB.config.autoReload then return end
+    if not WorldBossAnnouncerDB.config.autoReload then return end
 
-    local interval = DiscordBridgeDB.config.autoReloadInterval or 120
+    local interval = WorldBossAnnouncerDB.config.autoReloadInterval or 120
 
     autoReloadTicker = C_Timer.NewTicker(interval, function()
         -- Only reload if there are pending messages
-        if #DiscordBridgeDB.queue > 0 then
-            print("|cff00ff00[DiscordBridge]|r Auto-reloading to flush " .. #DiscordBridgeDB.queue .. " alert(s)...")
+        if #WorldBossAnnouncerDB.queue > 0 then
+            print("|cff00ff00[WorldBossAnnouncer]|r Auto-reloading to flush " .. #WorldBossAnnouncerDB.queue .. " alert(s)...")
             C_Timer.After(1, function()
                 ReloadUI()
             end)
@@ -202,74 +202,74 @@ local function SlashHandler(msg)
     local cmd = args[1]
 
     if cmd == "status" then
-        print("|cff00ff00[DiscordBridge]|r Status:")
-        print("  Enabled: " .. (DiscordBridgeDB.config.enabled and "|cff00ff00YES|r" or "|cffff0000NO|r"))
-        print("  Queue: " .. #DiscordBridgeDB.queue .. " / " .. DiscordBridgeDB.config.maxQueue)
-        print("  Last ID: " .. DiscordBridgeDB.meta.lastId)
-        print("  Auto-reload: " .. (DiscordBridgeDB.config.autoReload and "ON" or "OFF") ..
-              " (" .. DiscordBridgeDB.config.autoReloadInterval .. "s)")
-        print("  Watch boss yells: " .. (DiscordBridgeDB.config.watchBossYells and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
-        print("  Watch general chat: " .. (DiscordBridgeDB.config.watchGeneralChat and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
+        print("|cff00ff00[WorldBossAnnouncer]|r Status:")
+        print("  Enabled: " .. (WorldBossAnnouncerDB.config.enabled and "|cff00ff00YES|r" or "|cffff0000NO|r"))
+        print("  Queue: " .. #WorldBossAnnouncerDB.queue .. " / " .. WorldBossAnnouncerDB.config.maxQueue)
+        print("  Last ID: " .. WorldBossAnnouncerDB.meta.lastId)
+        print("  Auto-reload: " .. (WorldBossAnnouncerDB.config.autoReload and "ON" or "OFF") ..
+              " (" .. WorldBossAnnouncerDB.config.autoReloadInterval .. "s)")
+        print("  Watch boss yells: " .. (WorldBossAnnouncerDB.config.watchBossYells and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
+        print("  Watch general chat: " .. (WorldBossAnnouncerDB.config.watchGeneralChat and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
 
     elseif cmd == "flush" then
-        local count = #DiscordBridgeDB.queue
-        DiscordBridgeDB.queue = {}
-        print("|cff00ff00[DiscordBridge]|r Flushed " .. count .. " messages from queue.")
+        local count = #WorldBossAnnouncerDB.queue
+        WorldBossAnnouncerDB.queue = {}
+        print("|cff00ff00[WorldBossAnnouncer]|r Flushed " .. count .. " messages from queue.")
 
     elseif cmd == "autoreload" then
         local setting = args[2]
         if setting == "on" then
-            DiscordBridgeDB.config.autoReload = true
+            WorldBossAnnouncerDB.config.autoReload = true
             SetupAutoReload()
-            print("|cff00ff00[DiscordBridge]|r Auto-reload enabled.")
+            print("|cff00ff00[WorldBossAnnouncer]|r Auto-reload enabled.")
         elseif setting == "off" then
-            DiscordBridgeDB.config.autoReload = false
+            WorldBossAnnouncerDB.config.autoReload = false
             SetupAutoReload()
-            print("|cff00ff00[DiscordBridge]|r Auto-reload disabled.")
+            print("|cff00ff00[WorldBossAnnouncer]|r Auto-reload disabled.")
         else
-            print("|cff00ff00[DiscordBridge]|r Usage: /discordbridge autoreload on/off")
+            print("|cff00ff00[WorldBossAnnouncer]|r Usage: /discordbridge autoreload on/off")
         end
 
     elseif cmd == "interval" then
         local seconds = tonumber(args[2])
         if seconds and seconds >= 30 then
-            DiscordBridgeDB.config.autoReloadInterval = seconds
+            WorldBossAnnouncerDB.config.autoReloadInterval = seconds
             SetupAutoReload()
-            print("|cff00ff00[DiscordBridge]|r Auto-reload interval set to " .. seconds .. " seconds.")
+            print("|cff00ff00[WorldBossAnnouncer]|r Auto-reload interval set to " .. seconds .. " seconds.")
         else
-            print("|cff00ff00[DiscordBridge]|r Usage: /discordbridge interval <seconds> (minimum 30)")
+            print("|cff00ff00[WorldBossAnnouncer]|r Usage: /discordbridge interval <seconds> (minimum 30)")
         end
 
     elseif cmd == "enable" then
-        DiscordBridgeDB.config.enabled = true
-        print("|cff00ff00[DiscordBridge]|r Enabled.")
+        WorldBossAnnouncerDB.config.enabled = true
+        print("|cff00ff00[WorldBossAnnouncer]|r Enabled.")
 
     elseif cmd == "disable" then
-        DiscordBridgeDB.config.enabled = false
-        print("|cff00ff00[DiscordBridge]|r Disabled.")
+        WorldBossAnnouncerDB.config.enabled = false
+        print("|cff00ff00[WorldBossAnnouncer]|r Disabled.")
 
     elseif cmd == "bosses" then
         local setting = args[2]
         if setting == "on" then
-            DiscordBridgeDB.config.watchBossYells = true
-            print("|cff00ff00[DiscordBridge]|r Boss yell monitoring enabled.")
+            WorldBossAnnouncerDB.config.watchBossYells = true
+            print("|cff00ff00[WorldBossAnnouncer]|r Boss yell monitoring enabled.")
         elseif setting == "off" then
-            DiscordBridgeDB.config.watchBossYells = false
-            print("|cff00ff00[DiscordBridge]|r Boss yell monitoring disabled.")
+            WorldBossAnnouncerDB.config.watchBossYells = false
+            print("|cff00ff00[WorldBossAnnouncer]|r Boss yell monitoring disabled.")
         else
-            print("|cff00ff00[DiscordBridge]|r Usage: /discordbridge bosses on/off")
+            print("|cff00ff00[WorldBossAnnouncer]|r Usage: /discordbridge bosses on/off")
         end
 
     elseif cmd == "general" then
         local setting = args[2]
         if setting == "on" then
-            DiscordBridgeDB.config.watchGeneralChat = true
-            print("|cff00ff00[DiscordBridge]|r General chat monitoring enabled.")
+            WorldBossAnnouncerDB.config.watchGeneralChat = true
+            print("|cff00ff00[WorldBossAnnouncer]|r General chat monitoring enabled.")
         elseif setting == "off" then
-            DiscordBridgeDB.config.watchGeneralChat = false
-            print("|cff00ff00[DiscordBridge]|r General chat monitoring disabled.")
+            WorldBossAnnouncerDB.config.watchGeneralChat = false
+            print("|cff00ff00[WorldBossAnnouncer]|r General chat monitoring disabled.")
         else
-            print("|cff00ff00[DiscordBridge]|r Usage: /discordbridge general on/off")
+            print("|cff00ff00[WorldBossAnnouncer]|r Usage: /discordbridge general on/off")
         end
 
     elseif cmd == "test" then
@@ -277,7 +277,7 @@ local function SlashHandler(msg)
         QueueMessage("TEST", "TestPlayer", "Test alert - Kazzak spotted!", "test", {
             alertType = "TEST",
         })
-        print("|cff00ff00[DiscordBridge]|r Test alert queued. Run /reload to flush.")
+        print("|cff00ff00[WorldBossAnnouncer]|r Test alert queued. Run /reload to flush.")
 
     elseif cmd == "announce" then
         -- Manual announcement: /wba announce <boss> [layer]
@@ -285,7 +285,7 @@ local function SlashHandler(msg)
         local layer = args[3] or "1"
 
         if not bossName then
-            print("|cff00ff00[DiscordBridge]|r Usage: /wba announce <boss> [layer]")
+            print("|cff00ff00[WorldBossAnnouncer]|r Usage: /wba announce <boss> [layer]")
             print("  Example: /wba announce kazzak 1")
             print("  Bosses: kazzak, doomwalker")
             return
@@ -299,7 +299,7 @@ local function SlashHandler(msg)
 
         local fullBossName = bosses[string.lower(bossName)]
         if not fullBossName then
-            print("|cff00ff00[DiscordBridge]|r Unknown boss: " .. bossName)
+            print("|cff00ff00[WorldBossAnnouncer]|r Unknown boss: " .. bossName)
             print("  Valid bosses: kazzak, doomwalker")
             return
         end
@@ -316,7 +316,7 @@ local function SlashHandler(msg)
         })
 
         print("|cffff0000[WORLD BOSS]|r Announced: " .. fullBossName .. " Layer " .. layer)
-        print("|cff00ff00[DiscordBridge]|r Reloading UI to send alert...")
+        print("|cff00ff00[WorldBossAnnouncer]|r Reloading UI to send alert...")
         PlaySound(8959) -- RAID_WARNING sound
 
         -- Reload UI after a short delay to flush the alert
@@ -325,7 +325,7 @@ local function SlashHandler(msg)
         end)
 
     else
-        print("|cff00ff00[DiscordBridge]|r v" .. VERSION .. " - World Boss Announcer")
+        print("|cff00ff00[WorldBossAnnouncer]|r v" .. VERSION .. " - World Boss Announcer")
         print("  /wba announce <boss> [layer] - Announce a boss sighting")
         print("  /wba status - Show status")
         print("  /wba flush - Clear message queue")
@@ -339,9 +339,9 @@ local function SlashHandler(msg)
 end
 
 -- Register slash commands
-SLASH_DISCORDBRIDGE1 = "/discordbridge"
-SLASH_DISCORDBRIDGE2 = "/wbaa"  -- World Boss Announcer
-SlashCmdList["DISCORDBRIDGE"] = SlashHandler
+SLASH_WORLDBOSSANNOUNCER1 = "/worldbossannouncer"
+SLASH_WORLDBOSSANNOUNCER2 = "/wba"
+SlashCmdList["WORLDBOSSANNOUNCER"] = SlashHandler
 
 -- Register events
 frame:RegisterEvent("ADDON_LOADED")

@@ -24,7 +24,7 @@ CONFIG = {
     "BOT_API_URL": "https://worldbosstrackerdiscordbot.onrender.com",
 
     # Path to SavedVariables file (required)
-    # Example: /path/to/WoW/_classic_/WTF/Account/ACCOUNTNAME/SavedVariables/DiscordBridge.lua
+    # Example: /path/to/WoW/_classic_/WTF/Account/ACCOUNTNAME/SavedVariables/WorldBossAnnouncer.lua
     "SV_PATH": "",
 
     # Seconds between polling checks
@@ -319,7 +319,7 @@ def main_loop() -> None:
                 continue
 
             # Get queue from parsed data
-            db = data.get("DiscordBridgeDB", {})
+            db = data.get("WorldBossAnnouncerDB", {})
             queue = db.get("queue", {})
 
             # Convert queue dict to sorted list (Lua arrays are 1-indexed dicts)

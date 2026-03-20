@@ -30,15 +30,15 @@ A WoW Classic TBC Anniversary addon that detects world boss activity and forward
 Copy the addon files to your WoW Classic AddOns folder:
 
 ```
-WoW/_classic_/Interface/AddOns/DiscordBridge/
-├── DiscordBridge.toc
-└── DiscordBridge.lua
+WoW/_classic_/Interface/AddOns/WorldBossAnnouncer/
+├── WorldBossAnnouncer.toc
+└── WorldBossAnnouncer.lua
 ```
 
 Or clone directly:
 ```bash
 cd "/path/to/WoW/_classic_/Interface/AddOns"
-git clone https://github.com/Jbeeze/WorldBossAnnouncer.git DiscordBridge
+git clone https://github.com/Jbeeze/WorldBossAnnouncer.git WorldBossAnnouncer
 ```
 
 ### 2. Configure the Python Bridge
@@ -55,9 +55,9 @@ CONFIG = {
     "BOT_API_URL": "https://worldbosstrackerdiscordbot.onrender.com",
 
     # Path to SavedVariables file
-    # macOS: /Applications/World of Warcraft/_classic_/WTF/Account/ACCOUNTNAME/SavedVariables/DiscordBridge.lua
-    # Windows: C:\Program Files\World of Warcraft\_classic_\WTF\Account\ACCOUNTNAME\SavedVariables\DiscordBridge.lua
-    "SV_PATH": "/path/to/WTF/Account/ACCOUNTNAME/SavedVariables/DiscordBridge.lua",
+    # macOS: /Applications/World of Warcraft/_classic_/WTF/Account/ACCOUNTNAME/SavedVariables/WorldBossAnnouncer.lua
+    # Windows: C:\Program Files\World of Warcraft\_classic_\WTF\Account\ACCOUNTNAME\SavedVariables\WorldBossAnnouncer.lua
+    "SV_PATH": "/path/to/WTF/Account/ACCOUNTNAME/SavedVariables/WorldBossAnnouncer.lua",
 
     # How often to check for new alerts (seconds)
     "POLL_INTERVAL": 5,
@@ -135,8 +135,8 @@ The SavedVariables file is only created after:
 
 ```
 WorldBossAnnouncer/
-├── DiscordBridge.toc    # Addon metadata (Interface 20504)
-├── DiscordBridge.lua    # Main addon code
+├── WorldBossAnnouncer.toc    # Addon metadata (Interface 20504)
+├── WorldBossAnnouncer.lua    # Main addon code
 ├── bridge.py            # Python bridge script
 ├── requirements.txt     # Python dependencies
 └── README.md

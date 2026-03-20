@@ -1,0 +1,8 @@
+## Interface: 20504
+## Title: World Boss Announcer
+## Notes: Detects world boss activity and forwards alerts to Discord
+## Author: Jbeeze
+## Version: 1.0.0
+## SavedVariables: WorldBossAnnouncerDB
+
+WorldBossAnnouncer.lua
