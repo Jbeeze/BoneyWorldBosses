@@ -190,20 +190,31 @@ local function OnEvent(self, event, ...)
     end
 
     -- Whispers - look for same patterns as guild chat
+    -- Supports [TEST] prefix to test without pinging
     if event == "CHAT_MSG_WHISPER" then
         if not WorldBossAnnouncerDB.config.watchWhispers then return end
 
         local msg, author = ...
 
+        -- Check for [TEST] prefix
+        local isTest = string.match(msg, "^%[TEST%]") ~= nil
+        local cleanMsg = isTest and string.gsub(msg, "^%[TEST%]%s*", "") or msg
+
         -- Check each pattern
         for _, patternInfo in ipairs(GUILD_PATTERNS) do
-            local layer = string.match(msg, patternInfo.pattern)
+            local layer = string.match(cleanMsg, patternInfo.pattern)
             if layer then
                 -- Strip realm name from author
                 author = string.match(author, "([^-]+)") or author
 
-                QueueMessage(event, author, patternInfo.boss .. " UP Layer " .. layer, "whisper", {
-                    alertType = "WHISPER_REPORT",
+                local alertType = isTest and "WHISPER_TEST" or "WHISPER_REPORT"
+                local msgText = patternInfo.boss .. " UP Layer " .. layer
+                if isTest then
+                    msgText = "[TEST] " .. msgText
+                end
+
+                QueueMessage(event, author, msgText, "whisper", {
+                    alertType = alertType,
                     boss = patternInfo.boss,
                     layer = layer,
                     reporter = author,
