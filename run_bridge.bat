@@ -28,8 +28,8 @@ if errorlevel 1 (
     echo.
 )
 
-REM Check if config is set
-findstr /C:"CHAT_LOG_PATH\": \"\"" bridge.py >nul
+REM Check if config is set (look for empty CHAT_LOG_PATH)
+findstr /C:"CHAT_LOG_PATH" bridge.py | findstr /C:": \"\"," >nul 2>&1
 if not errorlevel 1 (
     echo ERROR: CHAT_LOG_PATH is not configured!
     echo.
