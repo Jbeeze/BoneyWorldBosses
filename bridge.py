@@ -24,7 +24,10 @@ CONFIG = {
     "BOT_API_URL": "https://worldbosstrackerdiscordbot.onrender.com",
 
     # Path to SavedVariables file (required)
-    # Example: /path/to/WoW/_classic_/WTF/Account/ACCOUNTNAME/SavedVariables/WorldBossAnnouncer.lua
+    # macOS: /Applications/World of Warcraft/_classic_/WTF/Account/ACCOUNTNAME/SavedVariables/WorldBossAnnouncer.lua
+    # Windows: Use forward slashes OR raw string to avoid escape issues:
+    #   "F:/Games/World of Warcraft/_anniversary_/WTF/Account/12345678#1/SavedVariables/WorldBossAnnouncer.lua"
+    #   or r"F:\Games\World of Warcraft\_anniversary_\WTF\Account\12345678#1\SavedVariables\WorldBossAnnouncer.lua"
     "SV_PATH": "",
 
     # Seconds between polling checks
