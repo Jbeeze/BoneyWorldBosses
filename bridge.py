@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
 World Boss Announcer - Discord Bridge v3
-Tails WoWCombatLog.txt for Kazzak/Doomwalker detection and posts to Discord bot.
+Tails WoWCombatLog for Kazzak/Doomwalker detection and posts to Discord bot.
+Automatically finds the most recent combat log file.
 Real-time alerts with no /reload required!
 """
 
+import glob
 import json
 import os
 import sys
@@ -22,10 +24,10 @@ CONFIG = {
     # Render: https://worldbosstrackerdiscordbot.onrender.com
     "BOT_API_URL": "https://worldbosstrackerdiscordbot.onrender.com",
 
-    # Path to WoWCombatLog.txt
-    # macOS: /Applications/World of Warcraft/_classic_/Logs/WoWCombatLog.txt
-    # Windows: C:\Program Files\World of Warcraft\_classic_\Logs\WoWCombatLog.txt
-    "COMBAT_LOG_PATH": "",
+    # Path to WoW Logs directory (NOT the specific file!)
+    # macOS: /Applications/World of Warcraft/_anniversary_/Logs
+    # Windows: C:\Program Files\World of Warcraft\_anniversary_\Logs
+    "LOGS_DIR": "",
 
     # Seconds between checking for new log lines
     "POLL_INTERVAL": 1,
@@ -219,6 +221,27 @@ def save_state(state: dict) -> None:
 # FILE TAILING
 # =============================================================================
 
+def find_latest_combat_log() -> str | None:
+    """
+    Find the most recent combat log file in the Logs directory.
+    Combat logs are named: WoWCombatLog-MMDDYY_HHMMSS.txt
+    Returns: Full path to the most recent file, or None if not found.
+    """
+    logs_dir = CONFIG["LOGS_DIR"]
+    if not logs_dir or not os.path.isdir(logs_dir):
+        return None
+
+    # Find all combat log files
+    pattern = os.path.join(logs_dir, "WoWCombatLog*.txt")
+    log_files = glob.glob(pattern)
+
+    if not log_files:
+        return None
+
+    # Return the most recently modified file
+    return max(log_files, key=os.path.getmtime)
+
+
 def get_file_info(path: str) -> tuple:
     """Get inode and size of file. Returns (inode, size) or (0, 0) if not found."""
     try:
@@ -231,35 +254,56 @@ def get_file_info(path: str) -> tuple:
 def tail_log_file():
     """
     Generator that yields new lines from the combat log file.
-    Handles file rotation (WoW recreates file on reload/relog).
+    Automatically finds and switches to the latest combat log file.
+    Handles file rotation (WoW creates new files with /combatlog).
     """
-    log_path = CONFIG["COMBAT_LOG_PATH"]
     state = load_state()
 
+    current_log_path = None
     last_inode = state.get("last_inode", 0)
     last_pos = state.get("last_pos", 0)
-
-    print(f"[TAIL] Starting from position {last_pos}")
+    last_log_file = state.get("last_log_file", "")
 
     file_handle = None
 
     while True:
         try:
-            # Check if file exists
-            if not os.path.exists(log_path):
+            # Find the latest combat log file
+            latest_log = find_latest_combat_log()
+
+            if not latest_log:
                 if file_handle:
                     file_handle.close()
                     file_handle = None
                 time.sleep(CONFIG["POLL_INTERVAL"])
                 continue
 
+            # Check if we switched to a new log file
+            if latest_log != current_log_path:
+                if current_log_path is not None:
+                    print(f"[TAIL] New combat log detected!")
+                    print(f"[TAIL]   Old: {os.path.basename(current_log_path)}")
+                    print(f"[TAIL]   New: {os.path.basename(latest_log)}")
+
+                current_log_path = latest_log
+
+                # If this is a different file than last session, start fresh
+                if current_log_path != last_log_file:
+                    last_inode = 0
+                    last_pos = 0
+
+                if file_handle:
+                    file_handle.close()
+                    file_handle = None
+
             # Get current file info
-            current_inode, current_size = get_file_info(log_path)
+            current_inode, current_size = get_file_info(current_log_path)
 
             # Detect file rotation (inode changed or file shrunk)
             file_rotated = False
             if current_inode != last_inode:
-                print(f"[TAIL] File rotated (inode changed: {last_inode} -> {current_inode})")
+                if last_inode != 0:
+                    print(f"[TAIL] File rotated (inode changed: {last_inode} -> {current_inode})")
                 file_rotated = True
             elif current_size < last_pos:
                 print(f"[TAIL] File rotated (size shrunk: {last_pos} -> {current_size})")
@@ -270,23 +314,30 @@ def tail_log_file():
                 if file_handle:
                     file_handle.close()
 
-                file_handle = open(log_path, "r", encoding="utf-8", errors="replace")
+                file_handle = open(current_log_path, "r", encoding="utf-8", errors="replace")
 
-                if file_rotated:
-                    # Start from beginning of new file, but skip to end to ignore history
-                    file_handle.seek(0, 2)  # Seek to end
+                if file_rotated and last_inode != 0:
+                    # Start from end to ignore history on rotation
+                    file_handle.seek(0, 2)
                     last_pos = file_handle.tell()
-                    print(f"[TAIL] Reopened file, starting from end (pos {last_pos})")
-                else:
+                    print(f"[TAIL] Starting from end of file (pos {last_pos})")
+                elif last_pos > 0:
                     # Resume from last known position
                     file_handle.seek(last_pos)
                     print(f"[TAIL] Resumed from position {last_pos}")
+                else:
+                    # New file, start from end
+                    file_handle.seek(0, 2)
+                    last_pos = file_handle.tell()
+                    print(f"[TAIL] Watching: {os.path.basename(current_log_path)}")
+                    print(f"[TAIL] Starting from end (pos {last_pos})")
 
                 last_inode = current_inode
 
                 # Save state
                 state["last_inode"] = last_inode
                 state["last_pos"] = last_pos
+                state["last_log_file"] = current_log_path
                 save_state(state)
 
             # Read new lines
@@ -347,11 +398,19 @@ def main_loop() -> None:
     """Main processing loop."""
     print(f"[WorldBossAnnouncer] Starting bridge v3 (combat log)...")
     print(f"  Bot API: {CONFIG['BOT_API_URL']}")
-    print(f"  Combat log: {CONFIG['COMBAT_LOG_PATH']}")
+    print(f"  Logs dir: {CONFIG['LOGS_DIR']}")
     print(f"  Poll interval: {CONFIG['POLL_INTERVAL']}s")
     print(f"  Dedup window: {CONFIG['DEDUP_WINDOW']}s")
     print(f"  Watching for NPC IDs: {', '.join(BOSS_NPC_IDS.keys())}")
     print(f"  Boss names: {', '.join(BOSS_NPC_IDS.values())}")
+    print()
+
+    # Show current combat log file
+    latest = find_latest_combat_log()
+    if latest:
+        print(f"[TAIL] Found combat log: {os.path.basename(latest)}")
+    else:
+        print(f"[TAIL] No combat log found yet. Run /combatlog in WoW to start one.")
     print()
 
     try:
@@ -368,8 +427,10 @@ def validate_config() -> bool:
     if not CONFIG["BOT_API_URL"]:
         errors.append("BOT_API_URL is not set")
 
-    if not CONFIG["COMBAT_LOG_PATH"]:
-        errors.append("COMBAT_LOG_PATH is not set")
+    if not CONFIG["LOGS_DIR"]:
+        errors.append("LOGS_DIR is not set")
+    elif not os.path.isdir(CONFIG["LOGS_DIR"]):
+        errors.append(f"LOGS_DIR does not exist: {CONFIG['LOGS_DIR']}")
 
     if errors:
         print("[CONFIG ERROR] Please fix the following issues:")

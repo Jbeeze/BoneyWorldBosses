@@ -39,7 +39,7 @@ local function SlashHandler(msg)
             LoggingCombat(true)
             isLoggingEnabled = true
             print("|cff00ff00[WorldBossAnnouncer]|r Combat logging |cff00ff00ENABLED|r")
-            print("|cff00ff00[WorldBossAnnouncer]|r Logs written to: WoW/_classic_/Logs/WoWCombatLog.txt")
+            print("|cff00ff00[WorldBossAnnouncer]|r Logs written to: WoW/_anniversary_/Logs/WoWCombatLog.txt")
         elseif setting == "off" then
             LoggingCombat(false)
             isLoggingEnabled = false
@@ -51,7 +51,7 @@ local function SlashHandler(msg)
     elseif cmd == "status" then
         print("|cff00ff00[WorldBossAnnouncer]|r Status:")
         print("  Combat logging: " .. (isLoggingEnabled and "|cff00ff00ENABLED|r" or "|cffff0000DISABLED|r"))
-        print("  Log file: WoW/_classic_/Logs/WoWCombatLog.txt")
+        print("  Log file: WoW/_anniversary_/Logs/WoWCombatLog.txt")
 
     else
         print("|cff00ff00[WorldBossAnnouncer]|r v" .. VERSION .. " - World Boss Announcer")

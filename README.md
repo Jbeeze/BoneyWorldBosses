@@ -22,6 +22,7 @@ A WoW Classic TBC Anniversary addon that detects world boss activity via combat 
 
 - **Real-Time Alerts**: No more `/reload` required - alerts within ~1 second
 - **Combat Log Detection**: Detects boss NPC IDs (18728 = Kazzak, 17711 = Doomwalker)
+- **Auto Log Discovery**: Automatically finds the latest `WoWCombatLog-*.txt` file
 - **GUID Parsing**: Extracts NPC ID from creature GUIDs in combat log
 - **Deduplication**: 30-second window prevents spam during continuous combat
 - **Simple Addon**: Just enables/disables WoW's built-in combat logging
@@ -50,14 +51,14 @@ This creates the log file that the bridge will tail. You only need to do this on
 Copy the addon files to your WoW Classic AddOns folder:
 
 ```
-WoW/_classic_/Interface/AddOns/WorldBossAnnouncer/
+WoW/_anniversary_/Interface/AddOns/WorldBossAnnouncer/
 ├── WorldBossAnnouncer.toc
 └── WorldBossAnnouncer.lua
 ```
 
 Or clone directly:
 ```bash
-cd "/path/to/WoW/_classic_/Interface/AddOns"
+cd "/path/to/WoW/_anniversary_/Interface/AddOns"
 git clone https://github.com/Jbeeze/WorldBossAnnouncer.git WorldBossAnnouncer
 ```
 
@@ -74,10 +75,11 @@ CONFIG = {
     # Your WorldBossTracker bot URL
     "BOT_API_URL": "https://worldbosstrackerdiscordbot.onrender.com",
 
-    # Path to WoWCombatLog.txt
-    # macOS: /Applications/World of Warcraft/_classic_/Logs/WoWCombatLog.txt
-    # Windows: C:\Program Files\World of Warcraft\_classic_\Logs\WoWCombatLog.txt
-    "COMBAT_LOG_PATH": "/path/to/WoW/_classic_/Logs/WoWCombatLog.txt",
+    # Path to WoW Logs directory (NOT the specific file!)
+    # The bridge automatically finds the latest WoWCombatLog-*.txt file
+    # macOS: /Applications/World of Warcraft/_anniversary_/Logs
+    # Windows: C:\Program Files\World of Warcraft\_anniversary_\Logs
+    "LOGS_DIR": "/path/to/WoW/_anniversary_/Logs",
 
     # How often to check for new lines (seconds)
     "POLL_INTERVAL": 1,
@@ -86,6 +88,8 @@ CONFIG = {
     "DEDUP_WINDOW": 30,
 }
 ```
+
+The bridge automatically detects the most recent combat log file (e.g., `WoWCombatLog-032126_151059.txt`) and switches to new ones when created.
 
 ### 4. Run the Bridge
 
@@ -168,7 +172,7 @@ Make sure your bot has the `CHANNEL_IDS` environment variable set to the Discord
 ### Alerts not appearing in Discord
 
 1. Check that `bridge.py` is running
-2. Verify `COMBAT_LOG_PATH` points to the correct log file
+2. Verify `LOGS_DIR` points to the correct Logs directory
 3. Ensure combat logging is enabled (`/wba status`)
 4. Ensure the bot is running and connected to Discord
 5. Check the bridge console for errors
@@ -176,9 +180,9 @@ Make sure your bot has the `CHANNEL_IDS` environment variable set to the Discord
 
 ### Log file not found
 
-1. Run `/combatlog` in WoW to initialize the file
-2. Verify `WoWCombatLog.txt` exists in `_classic_/Logs/`
-3. Make sure the path in `bridge.py` is correct
+1. Run `/combatlog` in WoW to create a combat log file
+2. Verify `WoWCombatLog-*.txt` files exist in `_anniversary_/Logs/`
+3. Make sure `LOGS_DIR` in `bridge.py` points to the Logs directory
 
 ### Bridge restarts reading old messages
 

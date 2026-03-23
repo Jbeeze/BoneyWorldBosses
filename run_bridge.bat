@@ -28,13 +28,13 @@ if errorlevel 1 (
     echo.
 )
 
-REM Check if config is set (look for empty CHAT_LOG_PATH)
-findstr /C:"CHAT_LOG_PATH" bridge.py | findstr /C:": \"\"," >nul 2>&1
+REM Check if config is set (look for empty LOGS_DIR)
+findstr /C:"LOGS_DIR" bridge.py | findstr /C:": \"\"," >nul 2>&1
 if not errorlevel 1 (
-    echo ERROR: CHAT_LOG_PATH is not configured!
+    echo ERROR: LOGS_DIR is not configured!
     echo.
-    echo Please edit bridge.py and set your WoWChatLog.txt path:
-    echo   Windows: C:\Program Files\World of Warcraft\_classic_\Logs\WoWChatLog.txt
+    echo Please edit bridge.py and set your WoW Logs directory:
+    echo   Windows: C:\Program Files\World of Warcraft\_anniversary_\Logs
     echo.
     pause
     exit /b 1

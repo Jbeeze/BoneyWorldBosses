@@ -27,11 +27,11 @@ if ! python3 -c "import requests" &> /dev/null; then
 fi
 
 # Check if config is set
-if grep -q 'CHAT_LOG_PATH": ""' bridge.py; then
-    echo "ERROR: CHAT_LOG_PATH is not configured!"
+if grep -q 'LOGS_DIR": ""' bridge.py; then
+    echo "ERROR: LOGS_DIR is not configured!"
     echo ""
-    echo "Please edit bridge.py and set your WoWChatLog.txt path:"
-    echo "  macOS: /Applications/World of Warcraft/_classic_/Logs/WoWChatLog.txt"
+    echo "Please edit bridge.py and set your WoW Logs directory:"
+    echo "  macOS: /Applications/World of Warcraft/_anniversary_/Logs"
     echo ""
     read -p "Press Enter to exit..."
     exit 1
