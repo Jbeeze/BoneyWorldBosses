@@ -1,40 +1,47 @@
-# World Boss Announcer v2
+# World Boss Announcer v3
 
-A WoW Classic TBC Anniversary addon that detects world boss activity and forwards alerts to Discord via the [WorldBossTracker](https://github.com/Jbeeze/WorldBossTrackerDiscordBot) bot.
+A WoW Classic TBC Anniversary addon that detects world boss activity via combat log and forwards alerts to Discord via the [WorldBossTracker](https://github.com/Jbeeze/WorldBossTrackerDiscordBot) bot.
 
 **Real-time alerts with no /reload required!**
 
 ## How It Works
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐     ┌─────────┐
-│  WoW Engine     │ ──► │  WoWChatLog.txt  │ ──► │  bridge.py      │ ──► │  Bot    │ ──► Discord
-│  (live logging) │     │  (real-time)     │     │  (tail -f)      │     │ (Render)│
-└─────────────────┘     └──────────────────┘     └─────────────────┘     └─────────┘
+┌─────────────────┐     ┌────────────────────┐     ┌─────────────────┐     ┌─────────┐
+│  WoW Combat Log │ ──► │  WoWCombatLog.txt  │ ──► │  bridge.py      │ ──► │  Bot    │ ──► Discord
+│  (live logging) │     │  (real-time)       │     │  (tail -f)      │     │ (Render)│
+└─────────────────┘     └────────────────────┘     └─────────────────┘     └─────────┘
 ```
 
-1. **WoW Engine** writes chat to log file when logging is enabled
-2. **Addon** controls `LoggingChat(true/false)` - auto-enabled on load
-3. **bridge.py** tails the log file, detects boss patterns, POSTs to bot API
+1. **WoW Engine** writes combat events to log file when logging is enabled
+2. **Addon** controls `LoggingCombat(true/false)` - auto-enabled on load
+3. **bridge.py** tails the log file, detects boss NPC IDs in GUIDs, POSTs to bot API
 4. **Bot** sends formatted messages to Discord
 
 ## Features
 
 - **Real-Time Alerts**: No more `/reload` required - alerts within ~1 second
-- **Boss Yell Detection**: Automatically detects when Doom Lord Kazzak or Doomwalker yells (spawns)
-- **Guild Chat Monitoring**: Watches for "Kazzak up L1", "Kazz up L2", "Doomwalker up L1" patterns
-- **Whisper Monitoring**: Same patterns via whisper, supports `[TEST]` prefix for no-ping testing
-- **Simple Addon**: Just enables/disables WoW's built-in chat logging
+- **Combat Log Detection**: Detects boss NPC IDs (18728 = Kazzak, 17711 = Doomwalker)
+- **GUID Parsing**: Extracts NPC ID from creature GUIDs in combat log
+- **Deduplication**: 30-second window prevents spam during continuous combat
+- **Simple Addon**: Just enables/disables WoW's built-in combat logging
+
+## Boss NPC IDs
+
+| Boss | NPC ID |
+|------|--------|
+| Doom Lord Kazzak | 18728 |
+| Doomwalker | 17711 |
 
 ## Installation
 
 ### 1. Initial Setup (One Time)
 
-Before the addon can work, you need to initialize the chat log file:
+Before the addon can work, you need to initialize the combat log file:
 
 1. Open WoW
-2. Type `/chatlog` in the chat window
-3. You should see: "Combat being logged to Logs\WoWChatLog.txt"
+2. Type `/combatlog` in the chat window
+3. You should see: "Combat being logged to Logs\WoWCombatLog.txt"
 
 This creates the log file that the bridge will tail. You only need to do this once.
 
@@ -67,16 +74,16 @@ CONFIG = {
     # Your WorldBossTracker bot URL
     "BOT_API_URL": "https://worldbosstrackerdiscordbot.onrender.com",
 
-    # Path to WoWChatLog.txt
-    # macOS: /Applications/World of Warcraft/_classic_/Logs/WoWChatLog.txt
-    # Windows: C:\Program Files\World of Warcraft\_classic_\Logs\WoWChatLog.txt
-    "CHAT_LOG_PATH": "/path/to/WoW/_classic_/Logs/WoWChatLog.txt",
+    # Path to WoWCombatLog.txt
+    # macOS: /Applications/World of Warcraft/_classic_/Logs/WoWCombatLog.txt
+    # Windows: C:\Program Files\World of Warcraft\_classic_\Logs\WoWCombatLog.txt
+    "COMBAT_LOG_PATH": "/path/to/WoW/_classic_/Logs/WoWCombatLog.txt",
 
     # How often to check for new lines (seconds)
     "POLL_INTERVAL": 1,
 
-    # Which chat channels to watch
-    "CHANNEL_FILTER": ["guild", "whisper", "yell"],
+    # Deduplication window (seconds) - prevents spam during combat
+    "DEDUP_WINDOW": 30,
 }
 ```
 
@@ -98,31 +105,57 @@ The bridge must run on the same machine as WoW since it reads local log files.
 | Command | Description |
 |---------|-------------|
 | `/wba` | Show help |
-| `/wba logging on` | Enable chat logging |
-| `/wba logging off` | Disable chat logging |
+| `/wba logging on` | Enable combat logging |
+| `/wba logging off` | Disable combat logging |
 | `/wba status` | Show logging status |
 
 The addon auto-enables logging when you log in, so you typically don't need to run any commands.
 
-## Alert Types
+## Alert Type
 
-| Type | Trigger | Discord Message |
-|------|---------|-----------------|
-| **BOSS_YELL** | Boss yells in-game | `@everyone WORLD BOSS SPOTTED: Doom Lord Kazzak` |
-| **GUILD_REPORT** | "kazzak up L1" in guild chat | `@everyone WORLD BOSS UP: Doom Lord Kazzak - Layer 1` |
-| **WHISPER_REPORT** | "kazzak up L1" via whisper | Same as guild report |
-| **WHISPER_TEST** | "[TEST] kazzak up L1" via whisper | Test alert (no @everyone ping) |
+| Source | Alert Type | Discord Message |
+|--------|------------|-----------------|
+| Combat log (boss NPC detected) | `COMBAT_DETECTED` | `@tbc WORLD BOSS: Doom Lord Kazzak detected in combat!` |
+
+## Combat Log Format
+
+The bridge parses WoW's combat log format:
+
+```
+M/D HH:MM:SS.mmm  SUBEVENT,sourceGUID,sourceName,...
+```
+
+GUID format for creatures:
+```
+Creature-0-server-instance-zone-NPCID-spawn
+```
+
+Example line:
+```
+3/23 14:30:45.123  SPELL_DAMAGE,Creature-0-5571-530-31401-18728-00005F3A2B,"Doom Lord Kazzak",...
+```
+
+The bridge extracts `18728` from position 5 of the GUID and matches it against known boss IDs.
+
+## Relevant Combat Events
+
+The bridge watches for these combat events:
+- `SPELL_CAST_START`, `SPELL_CAST_SUCCESS`
+- `SPELL_DAMAGE`, `SWING_DAMAGE`, `RANGE_DAMAGE`
+- `SPELL_AURA_APPLIED`
+
+## Requirements
+
+- Must be within ~50 yards of boss combat to receive combat log events
+- Someone must be actively fighting the boss for events to appear
+- Combat logging must be enabled (addon does this automatically)
 
 ## Testing
 
-1. Login to WoW - addon auto-enables logging
+1. Login to WoW - addon auto-enables combat logging
 2. Start `python bridge.py`
-3. Have someone type in guild chat: "Kazzak up L1"
+3. Engage or stand near a world boss fight (within 50 yards)
 4. Verify alert appears in Discord within ~1 second
-5. Run `/wba logging off` and verify no more alerts
-6. Run `/wba logging on` and verify alerts resume
-
-To test without pinging everyone, whisper yourself with: `[TEST] Kazzak up L1`
 
 ## Bot Setup
 
@@ -135,20 +168,27 @@ Make sure your bot has the `CHANNEL_IDS` environment variable set to the Discord
 ### Alerts not appearing in Discord
 
 1. Check that `bridge.py` is running
-2. Verify `CHAT_LOG_PATH` points to the correct log file
-3. Ensure chat logging is enabled (`/wba status`)
+2. Verify `COMBAT_LOG_PATH` points to the correct log file
+3. Ensure combat logging is enabled (`/wba status`)
 4. Ensure the bot is running and connected to Discord
 5. Check the bridge console for errors
+6. Verify you're within 50 yards of the combat
 
 ### Log file not found
 
-1. Run `/chatlog` in WoW to initialize the file
-2. Verify `WoWChatLog.txt` exists in `_classic_/Logs/`
+1. Run `/combatlog` in WoW to initialize the file
+2. Verify `WoWCombatLog.txt` exists in `_classic_/Logs/`
 3. Make sure the path in `bridge.py` is correct
 
 ### Bridge restarts reading old messages
 
 The bridge saves its position in `bridge_state.json`. On restart, it resumes from where it left off. If you want to start fresh, delete `bridge_state.json`.
+
+### No alerts during boss fight
+
+- Ensure you're within 50 yards of the combat
+- The boss must be actively fighting (not just spawned)
+- Check that combat logging is enabled with `/wba status`
 
 ## File Structure
 
@@ -164,14 +204,13 @@ WorldBossAnnouncer/
 └── README.md
 ```
 
-## v1 vs v2 Comparison
+## Version History
 
-| Aspect | v1 (SavedVariables) | v2 (Log Tailing) |
-|--------|---------------------|------------------|
-| Latency | Requires /reload | ~1 second |
-| User Action | Click reload popup | None |
-| Addon Complexity | Event capture + queue | Simple on/off |
-| File Size | Queue capped at 200 | Log grows but bridge ignores history |
+| Version | Detection Method | Notes |
+|---------|------------------|-------|
+| v1 | SavedVariables | Required /reload |
+| v2 | Chat log tailing | Real-time, pattern matching |
+| v3 | Combat log tailing | Real-time, NPC ID matching |
 
 ## License
 

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-World Boss Announcer - Discord Bridge v2
-Tails WoWChatLog.txt for Kazzak/Doomwalker alerts and posts to Discord bot.
+World Boss Announcer - Discord Bridge v3
+Tails WoWCombatLog.txt for Kazzak/Doomwalker detection and posts to Discord bot.
 Real-time alerts with no /reload required!
 """
 
 import json
 import os
-import re
 import sys
 import time
 from pathlib import Path
@@ -23,120 +22,144 @@ CONFIG = {
     # Render: https://worldbosstrackerdiscordbot.onrender.com
     "BOT_API_URL": "https://worldbosstrackerdiscordbot.onrender.com",
 
-    # Path to WoWChatLog.txt
-    # macOS: /Applications/World of Warcraft/_classic_/Logs/WoWChatLog.txt
-    # Windows: C:\Program Files\World of Warcraft\_classic_\Logs\WoWChatLog.txt
-    "CHAT_LOG_PATH": "",
+    # Path to WoWCombatLog.txt
+    # macOS: /Applications/World of Warcraft/_classic_/Logs/WoWCombatLog.txt
+    # Windows: C:\Program Files\World of Warcraft\_classic_\Logs\WoWCombatLog.txt
+    "COMBAT_LOG_PATH": "",
 
     # Seconds between checking for new log lines
     "POLL_INTERVAL": 1,
 
-    # Which chat channels to watch (lowercase)
-    # Options: guild, whisper, yell, say, party, raid
-    "CHANNEL_FILTER": ["guild", "whisper", "yell"],
+    # Deduplication window in seconds (avoid spam from continuous combat)
+    "DEDUP_WINDOW": 30,
 }
 
 # State file path (same directory as this script)
 STATE_FILE = Path(__file__).parent / "bridge_state.json"
 
 # =============================================================================
-# BOSS DETECTION PATTERNS
+# BOSS NPC IDS
 # =============================================================================
 
-# World bosses we care about
-WORLD_BOSSES = {
-    "Doom Lord Kazzak": ["doom lord kazzak", "kazzak"],
-    "Doomwalker": ["doomwalker"],
+# World boss NPC IDs (extracted from combat log GUIDs)
+BOSS_NPC_IDS = {
+    "18728": "Doom Lord Kazzak",
+    "17711": "Doomwalker",
 }
 
-# Guild/whisper patterns: "Kazzak up L1", "Kazz up L2", "Doomwalker up L1", etc.
-# Returns (boss_name, layer) if matched
-BOSS_PATTERNS = [
-    (re.compile(r"[Kk]azzak\s+up\s+[Ll](\d+)", re.IGNORECASE), "Doom Lord Kazzak"),
-    (re.compile(r"[Kk]azz\s+up\s+[Ll](\d+)", re.IGNORECASE), "Doom Lord Kazzak"),
-    (re.compile(r"[Dd]oomwalker\s+up\s+[Ll](\d+)", re.IGNORECASE), "Doomwalker"),
-]
-
-# =============================================================================
-# CHAT LOG PARSING
-# =============================================================================
-
-# Chat log line format:
-# 11/5 20:34:12.442  [Guild] Thrall: Kazzak up L1
-# 11/5 20:34:18.330  Sylvanas whispers: Doomwalker up L2
-# 11/5 20:34:25.100  [Yell] Doom Lord Kazzak: <boss yell text>
-
-LOG_LINE_PATTERNS = {
-    # [Guild] PlayerName: message
-    "guild": re.compile(r"^\d+/\d+\s+[\d:.]+\s+\[Guild\]\s+([^:]+):\s+(.+)$"),
-    # PlayerName whispers: message
-    "whisper": re.compile(r"^\d+/\d+\s+[\d:.]+\s+([^\s]+)\s+whispers:\s+(.+)$"),
-    # [Yell] PlayerName: message (or boss name)
-    "yell": re.compile(r"^\d+/\d+\s+[\d:.]+\s+\[Yell\]\s+([^:]+):\s+(.+)$"),
-    # [Say] PlayerName: message
-    "say": re.compile(r"^\d+/\d+\s+[\d:.]+\s+\[Say\]\s+([^:]+):\s+(.+)$"),
-    # [Party] PlayerName: message
-    "party": re.compile(r"^\d+/\d+\s+[\d:.]+\s+\[Party\]\s+([^:]+):\s+(.+)$"),
-    # [Raid] PlayerName: message
-    "raid": re.compile(r"^\d+/\d+\s+[\d:.]+\s+\[Raid\]\s+([^:]+):\s+(.+)$"),
+# Combat events that indicate boss activity
+COMBAT_EVENTS = {
+    "SPELL_CAST_START",
+    "SPELL_CAST_SUCCESS",
+    "SPELL_DAMAGE",
+    "SWING_DAMAGE",
+    "RANGE_DAMAGE",
+    "SPELL_AURA_APPLIED",
 }
 
+# =============================================================================
+# COMBAT LOG PARSING
+# =============================================================================
 
-def parse_log_line(line: str):
+# Combat log format:
+# M/D HH:MM:SS.mmm  SUBEVENT,sourceGUID,sourceName,...
+# GUID format: Creature-0-server-instance-zone-NPCID-spawn
+# Example: Creature-0-5571-530-31401-18728-00005F3A2B
+
+def extract_npc_id_from_guid(guid: str) -> str | None:
     """
-    Parse a chat log line and return structured data if it matches a watched channel.
-    Returns: {"channel": str, "author": str, "message": str} or None
+    Extract NPC ID from a creature GUID.
+    GUID format: Creature-0-server-instance-zone-NPCID-spawn
+    Returns: NPC ID string or None
+    """
+    if not guid or not guid.startswith("Creature-"):
+        return None
+
+    parts = guid.split("-")
+    if len(parts) >= 6:
+        return parts[5]  # NPC ID is at index 5
+    return None
+
+
+def parse_combat_line(line: str) -> dict | None:
+    """
+    Parse a combat log line and return structured data if it contains a boss.
+    Returns: {"boss_name": str, "event": str, "source_name": str} or None
     """
     line = line.strip()
     if not line:
         return None
 
-    for channel, pattern in LOG_LINE_PATTERNS.items():
-        match = pattern.match(line)
-        if match:
+    # Split timestamp from event data
+    # Format: "M/D HH:MM:SS.mmm  EVENT,..."
+    parts = line.split("  ", 1)  # Two spaces separate timestamp from data
+    if len(parts) != 2:
+        return None
+
+    event_data = parts[1]
+    if not event_data:
+        return None
+
+    # Split the CSV event data
+    fields = event_data.split(",")
+    if len(fields) < 3:
+        return None
+
+    event_type = fields[0]
+
+    # Only process relevant combat events
+    if event_type not in COMBAT_EVENTS:
+        return None
+
+    # Extract source GUID (field index 1) and source name (field index 2)
+    source_guid = fields[1]
+    source_name = fields[2].strip('"') if len(fields) > 2 else ""
+
+    # Check if source is a boss
+    npc_id = extract_npc_id_from_guid(source_guid)
+    if npc_id and npc_id in BOSS_NPC_IDS:
+        return {
+            "boss_name": BOSS_NPC_IDS[npc_id],
+            "npc_id": npc_id,
+            "event": event_type,
+            "source_name": source_name,
+        }
+
+    # Also check dest GUID for damage events (player attacking boss)
+    if len(fields) >= 6:
+        dest_guid = fields[4]
+        dest_name = fields[5].strip('"') if len(fields) > 5 else ""
+
+        npc_id = extract_npc_id_from_guid(dest_guid)
+        if npc_id and npc_id in BOSS_NPC_IDS:
             return {
-                "channel": channel,
-                "author": match.group(1).strip(),
-                "message": match.group(2).strip(),
+                "boss_name": BOSS_NPC_IDS[npc_id],
+                "npc_id": npc_id,
+                "event": event_type,
+                "source_name": dest_name,
             }
 
     return None
 
 
-def check_boss_pattern(message: str):
-    """
-    Check if message matches a boss announcement pattern.
-    Returns: (boss_name, layer) or None
-    """
-    for pattern, boss_name in BOSS_PATTERNS:
-        match = pattern.search(message)
-        if match:
-            layer = match.group(1)
-            return (boss_name, layer)
-    return None
+# =============================================================================
+# DEDUPLICATION
+# =============================================================================
+
+# Track last alert time per boss to avoid spam
+_last_alert_times: dict[str, float] = {}
 
 
-def check_boss_yell(author: str):
-    """
-    Check if the author is a world boss (for yell detection).
-    Returns: boss_name or None
-    """
-    author_lower = author.lower()
-    for boss_name, aliases in WORLD_BOSSES.items():
-        for alias in aliases:
-            if alias in author_lower:
-                return boss_name
-    return None
+def should_alert(boss_name: str) -> bool:
+    """Check if we should send an alert for this boss (deduplication)."""
+    now = time.time()
+    last_time = _last_alert_times.get(boss_name, 0)
 
+    if now - last_time >= CONFIG["DEDUP_WINDOW"]:
+        _last_alert_times[boss_name] = now
+        return True
 
-def is_test_message(message: str) -> bool:
-    """Check if message has [TEST] prefix."""
-    return message.strip().upper().startswith("[TEST]")
-
-
-def clean_test_prefix(message: str) -> str:
-    """Remove [TEST] prefix from message."""
-    return re.sub(r"^\[TEST\]\s*", "", message, flags=re.IGNORECASE)
+    return False
 
 
 # =============================================================================
@@ -207,10 +230,10 @@ def get_file_info(path: str) -> tuple:
 
 def tail_log_file():
     """
-    Generator that yields new lines from the chat log file.
+    Generator that yields new lines from the combat log file.
     Handles file rotation (WoW recreates file on reload/relog).
     """
-    log_path = CONFIG["CHAT_LOG_PATH"]
+    log_path = CONFIG["COMBAT_LOG_PATH"]
     state = load_state()
 
     last_inode = state.get("last_inode", 0)
@@ -297,74 +320,38 @@ def tail_log_file():
 
 def process_line(line: str) -> None:
     """Process a single log line and send alerts if needed."""
-    parsed = parse_log_line(line)
-    if not parsed:
+    result = parse_combat_line(line)
+    if not result:
         return
 
-    channel = parsed["channel"]
-    author = parsed["author"]
-    message = parsed["message"]
+    boss_name = result["boss_name"]
 
-    # Check channel filter
-    if CONFIG["CHANNEL_FILTER"] and channel not in CONFIG["CHANNEL_FILTER"]:
+    # Check deduplication
+    if not should_alert(boss_name):
         return
 
-    # Check for test message
-    is_test = is_test_message(message)
-    if is_test:
-        message = clean_test_prefix(message)
+    print(f"[ALERT] COMBAT_DETECTED: {boss_name} (NPC {result['npc_id']}) - {result['event']}")
 
-    # Check for boss yell (boss speaking)
-    if channel == "yell":
-        boss_name = check_boss_yell(author)
-        if boss_name:
-            print(f"[ALERT] BOSS_YELL: {boss_name} yelled!")
-            alert = {
-                "alertType": "BOSS_YELL",
-                "author": author,
-                "msg": message,
-                "channel": "boss_yell",
-                "boss": boss_name,
-                "layer": "?",
-            }
-            post_to_bot(alert)
-            return
-
-    # Check for boss announcement patterns in guild/whisper/yell
-    result = check_boss_pattern(message)
-    if result:
-        boss_name, layer = result
-
-        alert_type = "WHISPER_TEST" if is_test and channel == "whisper" else (
-            "WHISPER_REPORT" if channel == "whisper" else "GUILD_REPORT"
-        )
-
-        formatted_msg = f"{boss_name} UP Layer {layer}"
-        if is_test:
-            formatted_msg = f"[TEST] {formatted_msg}"
-
-        print(f"[ALERT] {alert_type}: {author} reports {boss_name} L{layer}")
-
-        alert = {
-            "alertType": alert_type,
-            "author": author,
-            "msg": formatted_msg,
-            "channel": channel,
-            "boss": boss_name,
-            "layer": layer,
-            "reporter": author,
-        }
-        post_to_bot(alert)
+    alert = {
+        "alertType": "COMBAT_DETECTED",
+        "boss": boss_name,
+        "npcId": result["npc_id"],
+        "event": result["event"],
+        "msg": f"{boss_name} detected in combat!",
+        "channel": "combat_log",
+    }
+    post_to_bot(alert)
 
 
 def main_loop() -> None:
     """Main processing loop."""
-    print(f"[WorldBossAnnouncer] Starting bridge v2 (log tailing)...")
+    print(f"[WorldBossAnnouncer] Starting bridge v3 (combat log)...")
     print(f"  Bot API: {CONFIG['BOT_API_URL']}")
-    print(f"  Chat log: {CONFIG['CHAT_LOG_PATH']}")
+    print(f"  Combat log: {CONFIG['COMBAT_LOG_PATH']}")
     print(f"  Poll interval: {CONFIG['POLL_INTERVAL']}s")
-    print(f"  Watching channels: {', '.join(CONFIG['CHANNEL_FILTER'])}")
-    print(f"  Watching for: Kazzak, Doomwalker")
+    print(f"  Dedup window: {CONFIG['DEDUP_WINDOW']}s")
+    print(f"  Watching for NPC IDs: {', '.join(BOSS_NPC_IDS.keys())}")
+    print(f"  Boss names: {', '.join(BOSS_NPC_IDS.values())}")
     print()
 
     try:
@@ -381,8 +368,8 @@ def validate_config() -> bool:
     if not CONFIG["BOT_API_URL"]:
         errors.append("BOT_API_URL is not set")
 
-    if not CONFIG["CHAT_LOG_PATH"]:
-        errors.append("CHAT_LOG_PATH is not set")
+    if not CONFIG["COMBAT_LOG_PATH"]:
+        errors.append("COMBAT_LOG_PATH is not set")
 
     if errors:
         print("[CONFIG ERROR] Please fix the following issues:")
@@ -397,9 +384,9 @@ def validate_config() -> bool:
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("  World Boss Announcer - Bridge v2.0")
-    print("  Real-time log tailing (no /reload needed!)")
-    print("  Watches for Kazzak/Doomwalker alerts")
+    print("  World Boss Announcer - Bridge v3.0")
+    print("  Combat log detection (real-time!)")
+    print("  Watches for Kazzak/Doomwalker NPC IDs")
     print("=" * 60)
     print()
 
