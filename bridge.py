@@ -8,6 +8,8 @@ Two detection modes:
 Automatically finds the most recent combat log file.
 """
 
+from __future__ import annotations
+
 import glob
 import json
 import os
