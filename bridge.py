@@ -79,9 +79,7 @@ COMBAT_EVENTS = {
 # =============================================================================
 
 # Combat log format:
-# M/D/YYYY HH:MM:SS.mmm  SUBEVENT,sourceGUID,sourceName,...
-# Example: 3/29/2026 13:37:49.892  UNIT_DIED,...,Creature-0-6257-530-104772-18463-0000495DFA,"Dampscale Devourer",...
-#
+# M/D HH:MM:SS.mmm  SUBEVENT,sourceGUID,sourceName,...
 # GUID format: Creature-0-server-zone-instance-NPCID-spawn
 # Example: Creature-0-6257-530-104772-18463-0000495DFA
 #          [0]=Creature, [1]=0, [2]=server, [3]=zone, [4]=instance, [5]=npcId, [6]=spawn
