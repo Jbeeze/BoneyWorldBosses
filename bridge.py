@@ -268,19 +268,6 @@ def parse_savedvariables(path: str, verbose: bool = False) -> dict:
     """
     Parse the WorldBossAnnouncer.lua SavedVariables file.
     Returns a dict with pendingKills list.
-
-    Lua format (WoW uses tabs and -- comments):
-    WorldBossAnnouncerDB = {
-        ["pendingKills"] = {
-            {
-                ["boss"] = "kazzak",
-                ["time"] = "11:35am",
-                ["layer"] = "2",
-                ["layerId"] = "31401",
-                ["timestamp"] = 1711043445,
-            }, -- [1]
-        },
-    }
     """
     result = {"pendingKills": []}
 
@@ -294,39 +281,59 @@ def parse_savedvariables(path: str, verbose: bool = False) -> dict:
     if verbose:
         print(f"[KILL] SavedVariables file size: {len(content)} bytes")
 
-    # Find the pendingKills table - try multiple patterns
-    # Pattern 1: ["pendingKills"] = { ... }
-    # Pattern 2: pendingKills = { ... }
-    pending_match = re.search(
-        r'\["?pendingKills"?\]\s*=\s*\{(.*?)\n\t?\},',
-        content,
-        re.DOTALL
-    )
-
-    if not pending_match:
-        # Try alternate pattern with more flexible ending
-        pending_match = re.search(
-            r'\["?pendingKills"?\]\s*=\s*\{(.*?)\},\s*\n',
-            content,
-            re.DOTALL
-        )
-
-    if not pending_match:
-        print("[KILL] Could not find pendingKills table in SavedVariables")
-        # Print a snippet to help debug
-        if "pendingKills" in content:
-            idx = content.find("pendingKills")
-            print(f"[KILL] Found 'pendingKills' at position {idx}, context:")
-            print(content[max(0, idx-20):idx+200])
+    # Find the pendingKills section by looking for it and extracting until ["config"]
+    # or end of WorldBossAnnouncerDB
+    pending_start = content.find('["pendingKills"]')
+    if pending_start == -1:
+        if verbose:
+            print("[KILL] Could not find pendingKills in SavedVariables")
         return result
 
-    pending_content = pending_match.group(1)
+    # Find where pendingKills data starts (after the = {)
+    data_start = content.find('{', pending_start)
+    if data_start == -1:
+        return result
 
-    # Find each kill entry: { ... }, or { ... }, -- [n]
-    kill_pattern = re.compile(r'\{([^{}]+)\}', re.DOTALL)
+    # Find the end - look for },\n["config"] or },\n}
+    # We need to find the matching closing brace
+    brace_count = 0
+    data_end = data_start
+    for i in range(data_start, len(content)):
+        if content[i] == '{':
+            brace_count += 1
+        elif content[i] == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                data_end = i
+                break
 
-    for kill_match in kill_pattern.finditer(pending_content):
-        kill_str = kill_match.group(1)
+    pending_content = content[data_start+1:data_end]
+
+    if verbose:
+        print(f"[KILL] pendingKills content length: {len(pending_content)} chars")
+
+    # Find each kill entry by matching balanced braces
+    i = 0
+    while i < len(pending_content):
+        # Find start of an entry
+        entry_start = pending_content.find('{', i)
+        if entry_start == -1:
+            break
+
+        # Find matching close brace
+        brace_count = 0
+        entry_end = entry_start
+        for j in range(entry_start, len(pending_content)):
+            if pending_content[j] == '{':
+                brace_count += 1
+            elif pending_content[j] == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    entry_end = j
+                    break
+
+        kill_str = pending_content[entry_start+1:entry_end]
+        i = entry_end + 1
 
         # Extract fields
         kill = {}
@@ -357,6 +364,8 @@ def parse_savedvariables(path: str, verbose: bool = False) -> dict:
         # Only add if we have required fields
         if "boss" in kill and "timestamp" in kill:
             result["pendingKills"].append(kill)
+            if verbose:
+                print(f"[KILL] Parsed kill: {kill.get('testTargetName', kill.get('boss'))} at {kill.get('time')}")
         elif kill:
             print(f"[KILL] Skipping incomplete kill record: {kill}")
 
