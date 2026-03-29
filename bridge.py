@@ -264,7 +264,7 @@ def find_savedvariables_file() -> str | None:
     return max(files, key=os.path.getmtime)
 
 
-def parse_savedvariables(path: str) -> dict:
+def parse_savedvariables(path: str, verbose: bool = False) -> dict:
     """
     Parse the WorldBossAnnouncer.lua SavedVariables file.
     Returns a dict with pendingKills list.
@@ -291,8 +291,9 @@ def parse_savedvariables(path: str) -> dict:
         print(f"[KILL] Error reading SavedVariables: {e}")
         return result
 
-    # Debug: print first 500 chars of file
-    # print(f"[DEBUG] SavedVariables content preview:\n{content[:500]}")
+    if verbose:
+        print(f"[KILL] SavedVariables file size: {len(content)} bytes")
+        print(f"[KILL] File contents:\n{content}")
 
     # Find the pendingKills table - try multiple patterns
     # Pattern 1: ["pendingKills"] = { ... }
@@ -440,7 +441,7 @@ def check_pending_kills(state: dict, verbose: bool = False) -> None:
     if verbose:
         print(f"[KILL] Reading SavedVariables: {sv_file}")
 
-    data = parse_savedvariables(sv_file)
+    data = parse_savedvariables(sv_file, verbose=verbose)
     pending_kills = data.get("pendingKills", [])
 
     if verbose and not pending_kills:
@@ -528,7 +529,7 @@ def tail_log_file(state: dict):
             # Periodically check for pending kill reports
             now = time.time()
             if now - last_kill_check >= CONFIG["KILL_REPORT_CHECK_INTERVAL"]:
-                check_pending_kills(state, verbose=True)
+                check_pending_kills(state, verbose=False)
                 last_kill_check = now
 
             # Find the latest combat log file
