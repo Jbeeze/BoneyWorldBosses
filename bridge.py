@@ -293,7 +293,6 @@ def parse_savedvariables(path: str, verbose: bool = False) -> dict:
 
     if verbose:
         print(f"[KILL] SavedVariables file size: {len(content)} bytes")
-        print(f"[KILL] File contents:\n{content}")
 
     # Find the pendingKills table - try multiple patterns
     # Pattern 1: ["pendingKills"] = { ... }

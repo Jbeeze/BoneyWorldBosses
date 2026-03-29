@@ -200,7 +200,8 @@ local function OnCombatLogEvent()
     local timestamp, subevent, hideCaster, sourceGUID, sourceName, sourceFlags, sourceRaidFlags,
           destGUID, destName, destFlags, destRaidFlags = CombatLogGetCurrentEventInfo()
 
-    if subevent == "UNIT_DIED" then
+    -- UNIT_DIED fires for solo kills, PARTY_KILL fires when in a party/raid
+    if subevent == "UNIT_DIED" or subevent == "PARTY_KILL" then
         OnUnitDied(destGUID, destName)
     end
 end
