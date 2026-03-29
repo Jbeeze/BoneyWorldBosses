@@ -437,41 +437,54 @@ def post_kill_report(kill: dict) -> bool:
     return post_to_bot(alert)
 
 
+_checking_kills = False  # Prevent re-entry
+
 def check_pending_kills(state: dict, verbose: bool = False) -> None:
     """Check SavedVariables for pending kill reports and send them."""
-    sv_file = find_savedvariables_file()
+    global _checking_kills
 
-    if not sv_file:
+    # Prevent re-entry
+    if _checking_kills:
+        return
+    _checking_kills = True
+
+    try:
+        sv_file = find_savedvariables_file()
+
+        if not sv_file:
+            if verbose:
+                print("[KILL] SavedVariables file not found")
+            return
+
         if verbose:
-            print("[KILL] SavedVariables file not found")
-        return
+            print(f"[KILL] Reading SavedVariables: {sv_file}")
 
-    if verbose:
-        print(f"[KILL] Reading SavedVariables: {sv_file}")
+        data = parse_savedvariables(sv_file, verbose=verbose)
+        pending_kills = data.get("pendingKills", [])
 
-    data = parse_savedvariables(sv_file, verbose=verbose)
-    pending_kills = data.get("pendingKills", [])
+        if verbose and not pending_kills:
+            print("[KILL] No pending kills found in SavedVariables")
 
-    if verbose and not pending_kills:
-        print("[KILL] No pending kills found in SavedVariables")
+        if not pending_kills:
+            return
 
-    if not pending_kills:
-        return
+        # Count unreported kills first
+        unreported = [k for k in pending_kills if not is_kill_already_reported(k, state)]
 
-    # Log what we found in SavedVariables
-    print(f"[KILL] Found {len(pending_kills)} pending kill(s) in SavedVariables")
-    for i, kill in enumerate(pending_kills, 1):
-        is_test = kill.get("isTest", False)
-        boss = kill.get("testTargetName", kill.get("boss", "unknown")) if is_test else kill.get("boss", "unknown")
-        prefix = "[TEST] " if is_test else ""
-        print(f"[KILL]   {i}. {prefix}{boss} - {kill.get('time', '?')} ST - Layer {kill.get('layer', '?')} ({kill.get('layerId', '?')})")
+        if not unreported:
+            if verbose:
+                print(f"[KILL] All {len(pending_kills)} kill(s) already reported")
+            return
 
-    new_kills_found = False
+        # Log what we found
+        print(f"[KILL] Found {len(unreported)} NEW kill(s) to report (of {len(pending_kills)} total)")
+        for i, kill in enumerate(unreported, 1):
+            is_test = kill.get("isTest", False)
+            boss = kill.get("testTargetName", kill.get("boss", "unknown")) if is_test else kill.get("boss", "unknown")
+            prefix = "[TEST] " if is_test else ""
+            print(f"[KILL]   {i}. {prefix}{boss} - {kill.get('time', '?')} ST - Layer {kill.get('layer', '?')} ({kill.get('layerId', '?')})")
 
-    for kill in pending_kills:
-        if not is_kill_already_reported(kill, state):
-            new_kills_found = True
-
+        for kill in unreported:
             if post_kill_report(kill):
                 mark_kill_reported(kill, state)
                 save_state(state)
@@ -479,8 +492,10 @@ def check_pending_kills(state: dict, verbose: bool = False) -> None:
             else:
                 print(f"[KILL] Failed to report kill, will retry later")
 
-    if new_kills_found:
         print(f"[KILL] Finished processing pending kills")
+
+    finally:
+        _checking_kills = False
 
 
 # =============================================================================
@@ -530,7 +545,7 @@ def tail_log_file(state: dict):
     last_log_file = state.get("last_log_file", "")
 
     file_handle = None
-    last_kill_check = 0
+    last_kill_check = time.time()  # Don't check immediately, main_loop already did
 
     while True:
         try:
