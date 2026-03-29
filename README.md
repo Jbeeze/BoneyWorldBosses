@@ -1,31 +1,41 @@
-# World Boss Announcer v3
+# World Boss Announcer v3.1
 
-A WoW Classic TBC Anniversary addon that detects world boss activity via combat log and forwards alerts to Discord via the [WorldBossTracker](https://github.com/Jbeeze/WorldBossTrackerDiscordBot) bot.
+A WoW Classic TBC Anniversary addon that detects world boss activity and reports kills to Discord via the [WorldBossTracker](https://github.com/Jbeeze/WorldBossTrackerDiscordBot) bot.
 
-**Real-time alerts with no /reload required!**
+## Features
+
+### Scout Mode (Real-Time)
+- **Real-Time Combat Alerts**: Detects boss combat via combat log within ~1 second
+- **NPC ID Detection**: Identifies Kazzak (18728) and Doomwalker (17711) by GUID
+- **Auto Log Discovery**: Automatically finds the latest `WoWCombatLog-*.txt` file
+- **Deduplication**: 30-second window prevents spam during continuous combat
+
+### Reporter Mode (Kill Reports)
+- **Kill Detection**: Detects boss deaths via UNIT_DIED combat event
+- **Layer Information**: Captures layer from NWB addon and layerId from GUID
+- **Server Time**: Records kill time in Server Time format
+- **Confirmation Popup**: Shows kill details before reporting
+- **Persistent Queue**: Kills saved to SavedVariables survive logouts
 
 ## How It Works
 
 ```
-┌─────────────────┐     ┌────────────────────┐     ┌─────────────────┐     ┌─────────┐
-│  WoW Combat Log │ ──► │  WoWCombatLog.txt  │ ──► │  bridge.py      │ ──► │  Bot    │ ──► Discord
-│  (live logging) │     │  (real-time)       │     │  (tail -f)      │     │ (Render)│
-└─────────────────┘     └────────────────────┘     └─────────────────┘     └─────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              SCOUT MODE                                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  WoW Combat Log ──► WoWCombatLog.txt ──► bridge.py ──► Bot ──► Discord     │
+│  (real-time)        (auto-detected)      (tail -f)                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                             REPORTER MODE                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  UNIT_DIED ──► pendingKills[] ──► /reload ──► SavedVariables ──► bridge.py │
+│  (in-game)     (queued)           (flush)     (on disk)          (polls)   │
+│                                                        │                    │
+│                                                        └──► Bot ──► Discord │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
-
-1. **WoW Engine** writes combat events to log file when logging is enabled
-2. **Addon** controls `LoggingCombat(true/false)` - auto-enabled on load
-3. **bridge.py** tails the log file, detects boss NPC IDs in GUIDs, POSTs to bot API
-4. **Bot** sends formatted messages to Discord
-
-## Features
-
-- **Real-Time Alerts**: No more `/reload` required - alerts within ~1 second
-- **Combat Log Detection**: Detects boss NPC IDs (18728 = Kazzak, 17711 = Doomwalker)
-- **Auto Log Discovery**: Automatically finds the latest `WoWCombatLog-*.txt` file
-- **GUID Parsing**: Extracts NPC ID from creature GUIDs in combat log
-- **Deduplication**: 30-second window prevents spam during continuous combat
-- **Simple Addon**: Just enables/disables WoW's built-in combat logging
 
 ## Boss NPC IDs
 
@@ -76,7 +86,6 @@ CONFIG = {
     "BOT_API_URL": "https://worldbosstrackerdiscordbot.onrender.com",
 
     # Path to WoW Logs directory (NOT the specific file!)
-    # The bridge automatically finds the latest WoWCombatLog-*.txt file
     # macOS: /Applications/World of Warcraft/_anniversary_/Logs
     # Windows: C:\Program Files\World of Warcraft\_anniversary_\Logs
     "LOGS_DIR": "/path/to/WoW/_anniversary_/Logs",
@@ -86,10 +95,11 @@ CONFIG = {
 
     # Deduplication window (seconds) - prevents spam during combat
     "DEDUP_WINDOW": 30,
+
+    # How often to check for kill reports (seconds)
+    "KILL_REPORT_CHECK_INTERVAL": 5,
 }
 ```
-
-The bridge automatically detects the most recent combat log file (e.g., `WoWCombatLog-032126_151059.txt`) and switches to new ones when created.
 
 ### 4. Run the Bridge
 
@@ -102,24 +112,52 @@ The bridge automatically detects the most recent combat log file (e.g., `WoWComb
 python bridge.py
 ```
 
-The bridge must run on the same machine as WoW since it reads local log files.
+The bridge must run on the same machine as WoW since it reads local files.
 
-## In-Game Commands
+## In-Game Settings
+
+### Interface Options Panel
+
+Access settings via: **ESC → Interface → AddOns → WorldBossAnnouncer**
+
+- **Enable Scout Mode**: Controls combat logging for real-time boss detection
+- **Enable Kill Reporter**: Detects boss kills and queues them for Discord
+- **Pending Kill Reports**: Shows count of unreported kills
+- **Clear Pending Kills**: Removes all queued kill reports
+
+### Slash Commands
 
 | Command | Description |
 |---------|-------------|
 | `/wba` | Show help |
-| `/wba logging on` | Enable combat logging |
-| `/wba logging off` | Disable combat logging |
-| `/wba status` | Show logging status |
+| `/wba scout on\|off` | Toggle Scout mode |
+| `/wba reporter on\|off` | Toggle Reporter mode |
+| `/wba status` | Show current status |
+| `/wba pending` | List pending kill reports |
+| `/wba clear` | Clear pending kill reports |
+| `/wba options` | Open settings panel |
+| `/wba test kill` | Test mode (next creature kill = test report) |
+| `/wba logging on\|off` | Legacy command (same as scout) |
 
-The addon auto-enables logging when you log in, so you typically don't need to run any commands.
+Both Scout and Reporter modes are **enabled by default**.
 
-## Alert Type
+## Alert Types
 
-| Source | Alert Type | Discord Message |
+| Source | Alert Type | Example Message |
 |--------|------------|-----------------|
-| Combat log (boss NPC detected) | `COMBAT_DETECTED` | `@tbc WORLD BOSS: Doom Lord Kazzak detected in combat!` |
+| Scout (combat detected) | `COMBAT_DETECTED` | `@tbc WORLD BOSS: Doom Lord Kazzak detected in combat!` |
+| Reporter (boss killed) | `BOSS_KILLED` | `Doom Lord Kazzak killed at 11:35am ST on Layer 2` |
+
+## Kill Reporting Flow
+
+1. **Kill Detected**: When a world boss dies within 50 yards, addon detects UNIT_DIED
+2. **Data Captured**: Boss name, kill time (Server Time), layer, and layerId from GUID
+3. **Popup Shown**: Confirmation dialog with kill details
+4. **Report Kill**: Click to trigger /reload, flushing SavedVariables to disk
+5. **Bridge Reads**: bridge.py polls SavedVariables every 5 seconds
+6. **Alert Sent**: BOSS_KILLED alert posted to Discord bot
+
+**Note**: The /reload is required because WoW only writes SavedVariables to disk on logout/reload.
 
 ## Combat Log Format
 
@@ -131,41 +169,68 @@ M/D HH:MM:SS.mmm  SUBEVENT,sourceGUID,sourceName,...
 
 GUID format for creatures:
 ```
-Creature-0-server-instance-zone-NPCID-spawn
+Creature-0-server-zone-instance-NPCID-spawn
 ```
 
-Example line:
+Example GUID: `Creature-0-6257-530-104772-18463-0000495DFA`
+- Position 0: `Creature` (type)
+- Position 1: `0` (marker)
+- Position 2: `6257` (server ID)
+- Position 3: `530` (zone ID - Outland)
+- Position 4: `104772` (instance/layer ID)
+- Position 5: `18463` (NPC ID)
+- Position 6: `0000495DFA` (spawn ID)
+
+Example UNIT_DIED line:
 ```
-3/23 14:30:45.123  SPELL_DAMAGE,Creature-0-5571-530-31401-18728-00005F3A2B,"Doom Lord Kazzak",...
+3/29 13:37:49.892  UNIT_DIED,0000000000000000,nil,0x80000000,0x80000000,Creature-0-6257-530-104772-18463-0000495DFA,"Dampscale Devourer",0x10a48,0x80000000,0
 ```
-
-The bridge extracts `18728` from position 5 of the GUID and matches it against known boss IDs.
-
-## Relevant Combat Events
-
-The bridge watches for these combat events:
-- `SPELL_CAST_START`, `SPELL_CAST_SUCCESS`
-- `SPELL_DAMAGE`, `SWING_DAMAGE`, `RANGE_DAMAGE`
-- `SPELL_AURA_APPLIED`
 
 ## Requirements
 
 - Must be within ~50 yards of boss combat to receive combat log events
 - Someone must be actively fighting the boss for events to appear
-- Combat logging must be enabled (addon does this automatically)
+- Combat logging must be enabled (addon does this automatically when Scout mode is on)
+- NWB addon recommended for accurate layer info (optional)
 
 ## Testing
 
+### Scout Mode
 1. Login to WoW - addon auto-enables combat logging
 2. Start `python bridge.py`
 3. Engage or stand near a world boss fight (within 50 yards)
 4. Verify alert appears in Discord within ~1 second
 
+### Reporter Mode
+1. Login to WoW with Reporter mode enabled
+2. Be within 50 yards when a world boss dies
+3. Popup appears with kill details
+4. Click "Report Kill" (triggers /reload)
+5. Check bridge console for kill report
+6. Verify kill recorded in Discord
+
+### Test Kill Mode
+Test the kill reporting flow without waiting for a world boss:
+
+1. Type `/wba test kill` to arm test mode
+2. Kill any creature (boar, critter, etc.)
+3. Popup appears with test kill details
+4. Click "Report Kill" (triggers /reload)
+5. Bridge sends test alert (marked as `isTest: true`)
+6. Test mode auto-disables after one kill
+
+### Edge Cases
+- Log out without clicking popup → kill saved, report on next login after /reload
+- Multiple kills before reload → all queued and reported
+- NWB not installed → layer shows "?" but layerId still captured from GUID
+
 ## Bot Setup
 
-This addon requires the [WorldBossTracker Discord bot](https://github.com/Jbeeze/WorldBossTrackerDiscordBot) to be running. The bot provides the `/webhook/alert` endpoint that receives alerts from bridge.py.
+This addon requires the [WorldBossTracker Discord bot](https://github.com/Jbeeze/WorldBossTrackerDiscordBot) to be running.
 
-Make sure your bot has the `CHANNEL_IDS` environment variable set to the Discord channel(s) where alerts should be posted.
+The bot needs to handle two alert types:
+- `COMBAT_DETECTED` - Real-time boss activity alerts
+- `BOSS_KILLED` - Kill reports with time/layer info
 
 ## Troubleshooting
 
@@ -178,6 +243,14 @@ Make sure your bot has the `CHANNEL_IDS` environment variable set to the Discord
 5. Check the bridge console for errors
 6. Verify you're within 50 yards of the combat
 
+### Kill reports not sending
+
+1. Ensure Reporter mode is enabled (`/wba status`)
+2. Check `/wba pending` to see if kills are queued
+3. Type `/reload` to flush SavedVariables
+4. Check bridge console for "[KILL]" messages
+5. Verify SavedVariables file exists in WTF folder
+
 ### Log file not found
 
 1. Run `/combatlog` in WoW to create a combat log file
@@ -187,12 +260,6 @@ Make sure your bot has the `CHANNEL_IDS` environment variable set to the Discord
 ### Bridge restarts reading old messages
 
 The bridge saves its position in `bridge_state.json`. On restart, it resumes from where it left off. If you want to start fresh, delete `bridge_state.json`.
-
-### No alerts during boss fight
-
-- Ensure you're within 50 yards of the combat
-- The boss must be actively fighting (not just spawned)
-- Check that combat logging is enabled with `/wba status`
 
 ## File Structure
 
@@ -204,17 +271,44 @@ WorldBossAnnouncer/
 ├── run_bridge.command        # macOS launcher (double-click)
 ├── run_bridge.bat            # Windows launcher (double-click)
 ├── requirements.txt          # Python dependencies
-├── bridge_state.json         # Bridge position state (auto-created)
+├── bridge_state.json         # Bridge position + reported kills (auto-created)
 └── README.md
+```
+
+## SavedVariables
+
+The addon stores data in:
+```
+WoW/_anniversary_/WTF/Account/<ACCOUNT>/SavedVariables/WorldBossAnnouncer.lua
+```
+
+Structure:
+```lua
+WorldBossAnnouncerDB = {
+    ["config"] = {
+        ["scoutEnabled"] = true,
+        ["reporterEnabled"] = true,
+    },
+    ["pendingKills"] = {
+        {
+            ["boss"] = "kazzak",
+            ["time"] = "11:35am",
+            ["layer"] = "2",
+            ["layerId"] = "31401",
+            ["timestamp"] = 1711043445,
+        },
+    },
+}
 ```
 
 ## Version History
 
-| Version | Detection Method | Notes |
-|---------|------------------|-------|
-| v1 | SavedVariables | Required /reload |
-| v2 | Chat log tailing | Real-time, pattern matching |
-| v3 | Combat log tailing | Real-time, NPC ID matching |
+| Version | Changes |
+|---------|---------|
+| v3.1 | Added Reporter mode (kill detection + reporting) |
+| v3.0 | Combat log tailing, NPC ID matching, real-time alerts |
+| v2.0 | Chat log tailing, pattern matching |
+| v1.0 | SavedVariables, required /reload |
 
 ## License
 

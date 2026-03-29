@@ -1,7 +1,8 @@
 ## Interface: 20504
 ## Title: World Boss Announcer
-## Notes: Enables chat logging for real-time world boss alerts to Discord
+## Notes: Scout (combat detection) and Reporter (kill reporting) for world boss Discord alerts
 ## Author: Jbeeze
-## Version: 2.0.0
+## Version: 3.1.0
+## SavedVariables: WorldBossAnnouncerDB
 
 WorldBossAnnouncer.lua
