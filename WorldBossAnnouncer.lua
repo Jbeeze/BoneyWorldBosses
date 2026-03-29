@@ -93,10 +93,44 @@ local function FormatTimeServerTime()
 end
 
 -- Get layer from NWB addon if available, otherwise "?"
-local function GetCurrentLayer()
-    if NWB and NWB.currentLayer then
+local function GetCurrentLayer(layerId)
+    if not NWB then
+        return "?"
+    end
+
+    -- Try multiple ways to get layer from NWB
+    -- Method 1: Direct currentLayer
+    if NWB.currentLayer and NWB.currentLayer > 0 then
         return tostring(NWB.currentLayer)
     end
+
+    -- Method 2: Look up layer by instance ID in NWB's layer map
+    if layerId and NWB.data and NWB.data.layers then
+        for layer, data in pairs(NWB.data.layers) do
+            if data and tostring(data.GUID or "") == tostring(layerId) then
+                return tostring(layer)
+            end
+            -- Also check layerMap if it exists
+            if data and data.layerMap then
+                for zoneId, instId in pairs(data.layerMap) do
+                    if tostring(instId) == tostring(layerId) then
+                        return tostring(layer)
+                    end
+                end
+            end
+        end
+    end
+
+    -- Method 3: Try NWB's lastKnownLayer
+    if NWB.lastKnownLayer and NWB.lastKnownLayer > 0 then
+        return tostring(NWB.lastKnownLayer)
+    end
+
+    -- Method 4: Try lastKnownLayerNum
+    if NWB.lastKnownLayerNum and NWB.lastKnownLayerNum > 0 then
+        return tostring(NWB.lastKnownLayerNum)
+    end
+
     return "?"
 end
 
@@ -159,8 +193,8 @@ local function OnUnitDied(destGuid, destName)
     end
 
     local killTime = FormatTimeServerTime()
-    local layer = GetCurrentLayer()
     local layerId = ExtractLayerIdFromGuid(destGuid) or "?"
+    local layer = GetCurrentLayer(layerId)
     local timestamp = time()
 
     -- Create kill record
@@ -480,6 +514,27 @@ local function SlashHandler(msg)
     elseif cmd == "options" or cmd == "config" or cmd == "settings" then
         InterfaceOptionsFrame_OpenToCategory("WorldBossAnnouncer")
         InterfaceOptionsFrame_OpenToCategory("WorldBossAnnouncer")  -- Called twice due to WoW bug
+
+    elseif cmd == "nwb" then
+        -- Debug: show NWB layer info
+        print("|cff00ff00[WorldBossAnnouncer]|r NWB Debug Info:")
+        if not NWB then
+            print("  NWB addon: |cffff0000NOT LOADED|r")
+        else
+            print("  NWB addon: |cff00ff00LOADED|r")
+            print("  NWB.currentLayer: " .. tostring(NWB.currentLayer or "nil"))
+            print("  NWB.lastKnownLayer: " .. tostring(NWB.lastKnownLayer or "nil"))
+            print("  NWB.lastKnownLayerNum: " .. tostring(NWB.lastKnownLayerNum or "nil"))
+            if NWB.data and NWB.data.layers then
+                print("  NWB.data.layers:")
+                for layer, data in pairs(NWB.data.layers) do
+                    local guid = data and data.GUID or "?"
+                    print("    Layer " .. tostring(layer) .. ": GUID=" .. tostring(guid))
+                end
+            else
+                print("  NWB.data.layers: nil")
+            end
+        end
 
     elseif cmd == "test" then
         local subcmd = args[2]
