@@ -417,6 +417,14 @@ def check_pending_kills(state: dict) -> None:
     if not pending_kills:
         return
 
+    # Log what we found in SavedVariables
+    print(f"[KILL] Found {len(pending_kills)} pending kill(s) in SavedVariables")
+    for i, kill in enumerate(pending_kills, 1):
+        is_test = kill.get("isTest", False)
+        boss = kill.get("testTargetName", kill.get("boss", "unknown")) if is_test else kill.get("boss", "unknown")
+        prefix = "[TEST] " if is_test else ""
+        print(f"[KILL]   {i}. {prefix}{boss} - {kill.get('time', '?')} ST - Layer {kill.get('layer', '?')} ({kill.get('layerId', '?')})")
+
     new_kills_found = False
 
     for kill in pending_kills:

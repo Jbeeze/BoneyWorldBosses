@@ -189,8 +189,9 @@ local function OnUnitDied(destGuid, destName)
         print("|cff00ff00[WorldBossAnnouncer]|r Time: " .. killTime .. " ST | Layer: " .. layer .. " | LayerId: " .. layerId)
     end
 
-    -- Show confirmation popup
-    StaticPopup_Show("WBA_CONFIRM_KILL_REPORT", bossDisplayName, killTime, layer)
+    -- Show confirmation popup (StaticPopup_Show only accepts 2 text args)
+    local popupDetails = "Time: " .. killTime .. " ST | Layer: " .. layer
+    StaticPopup_Show("WBA_CONFIRM_KILL_REPORT", bossDisplayName, popupDetails)
 end
 
 -- Handle combat log events
@@ -208,7 +209,7 @@ end
 -- =============================================================================
 
 StaticPopupDialogs["WBA_CONFIRM_KILL_REPORT"] = {
-    text = "World Boss Kill Detected!\n\n%s\nTime: %s ST\nLayer: %s\n\n|cffff8800Warning:|r Reporting will reload your UI",
+    text = "World Boss Kill Detected!\n\n%s\n%s\n\n|cffff8800Warning:|r Reporting will reload your UI",
     button1 = "Report Kill",
     button2 = "Cancel",
     OnAccept = function()
