@@ -143,6 +143,7 @@ local function OnUnitDied(destGuid, destName)
 
         bossKey = "test"
         bossDisplayName = destName or "Unknown Creature"  -- Use actual creature name
+        layer = "0"  -- Test kills always use layer 0
     else
         -- Normal mode: check if Reporter is enabled and this is a boss
         if not db.config.reporterEnabled then
@@ -449,8 +450,12 @@ local function SlashHandler(msg)
         print("|cff00ff00[WorldBossAnnouncer]|r Status:")
         local scoutStatus = db.config.scoutEnabled and "|cff00ff00ON|r" or "|cffff0000OFF|r"
         local reporterStatus = db.config.reporterEnabled and "|cff00ff00ON|r" or "|cffff0000OFF|r"
+        local loggingStatus = isLoggingEnabled and "|cff00ff00ACTIVE|r" or "|cffff0000INACTIVE|r"
+        local testStatus = testKillModeActive and "|cffff8800ARMED|r" or "off"
         print("  Scout (combat logging): " .. scoutStatus)
         print("  Reporter (kill reports): " .. reporterStatus)
+        print("  Combat logging: " .. loggingStatus .. " (required for Scout/Test)")
+        print("  Test kill mode: " .. testStatus)
         print("  Pending kills: " .. #db.pendingKills)
         print("  Log file: WoW/_anniversary_/Logs/WoWCombatLog.txt")
 
@@ -484,6 +489,12 @@ local function SlashHandler(msg)
                 testKillModeActive = true
                 -- Ensure we're listening for combat log events
                 frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+                -- Ensure combat logging is enabled (required for events to fire)
+                if not isLoggingEnabled then
+                    LoggingCombat(true)
+                    isLoggingEnabled = true
+                    print("|cffff8800[WorldBossAnnouncer]|r Combat logging enabled for test")
+                end
                 print("|cffff8800[WorldBossAnnouncer]|r TEST KILL MODE ACTIVE")
                 print("|cffff8800[WorldBossAnnouncer]|r Kill any creature to generate a test kill report.")
                 print("|cffff8800[WorldBossAnnouncer]|r Mode will auto-disable after one kill.")
