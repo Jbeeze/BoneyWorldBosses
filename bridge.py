@@ -31,7 +31,7 @@ CONFIG = {
 
     # Path to WoW Logs directory (NOT the specific file!)
     # macOS: /Applications/World of Warcraft/_anniversary_/Logs
-    # Windows: C:\Program Files\World of Warcraft\_anniversary_\Logs
+    # Windows: C:/Program Files/World of Warcraft/_anniversary_/Logs
     "LOGS_DIR": "",
 
     # Seconds between checking for new log lines
