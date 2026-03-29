@@ -269,7 +269,7 @@ def parse_savedvariables(path: str) -> dict:
     Parse the WorldBossAnnouncer.lua SavedVariables file.
     Returns a dict with pendingKills list.
 
-    Lua format:
+    Lua format (WoW uses tabs and -- comments):
     WorldBossAnnouncerDB = {
         ["pendingKills"] = {
             {
@@ -278,7 +278,7 @@ def parse_savedvariables(path: str) -> dict:
                 ["layer"] = "2",
                 ["layerId"] = "31401",
                 ["timestamp"] = 1711043445,
-            },
+            }, -- [1]
         },
     }
     """
@@ -287,24 +287,43 @@ def parse_savedvariables(path: str) -> dict:
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
-    except IOError:
+    except IOError as e:
+        print(f"[KILL] Error reading SavedVariables: {e}")
         return result
 
-    # Find the pendingKills table
-    # Match: ["pendingKills"] = { ... }
+    # Debug: print first 500 chars of file
+    # print(f"[DEBUG] SavedVariables content preview:\n{content[:500]}")
+
+    # Find the pendingKills table - try multiple patterns
+    # Pattern 1: ["pendingKills"] = { ... }
+    # Pattern 2: pendingKills = { ... }
     pending_match = re.search(
-        r'\["pendingKills"\]\s*=\s*\{(.*?)\n\s*\},',
+        r'\["?pendingKills"?\]\s*=\s*\{(.*?)\n\t?\},',
         content,
         re.DOTALL
     )
 
     if not pending_match:
+        # Try alternate pattern with more flexible ending
+        pending_match = re.search(
+            r'\["?pendingKills"?\]\s*=\s*\{(.*?)\},\s*\n',
+            content,
+            re.DOTALL
+        )
+
+    if not pending_match:
+        print("[KILL] Could not find pendingKills table in SavedVariables")
+        # Print a snippet to help debug
+        if "pendingKills" in content:
+            idx = content.find("pendingKills")
+            print(f"[KILL] Found 'pendingKills' at position {idx}, context:")
+            print(content[max(0, idx-20):idx+200])
         return result
 
     pending_content = pending_match.group(1)
 
-    # Find each kill entry: { ... },
-    kill_pattern = re.compile(r'\{\s*(.*?)\s*\},', re.DOTALL)
+    # Find each kill entry: { ... }, or { ... }, -- [n]
+    kill_pattern = re.compile(r'\{([^{}]+)\}', re.DOTALL)
 
     for kill_match in kill_pattern.finditer(pending_content):
         kill_str = kill_match.group(1)
@@ -313,7 +332,7 @@ def parse_savedvariables(path: str) -> dict:
         kill = {}
 
         # Match ["key"] = "value" or ["key"] = number or ["key"] = true/false
-        field_pattern = re.compile(r'\["(\w+)"\]\s*=\s*(?:"([^"]*)"|([\d.]+)|(true|false))')
+        field_pattern = re.compile(r'\["(\w+)"\]\s*=\s*(?:"([^"]*)"|([\d.]+)|(true|false|nil))')
 
         for field_match in field_pattern.finditer(kill_str):
             key = field_match.group(1)
@@ -330,11 +349,16 @@ def parse_savedvariables(path: str) -> dict:
                 else:
                     kill[key] = num_value
             elif bool_value is not None:
-                kill[key] = bool_value == "true"
+                if bool_value == "nil":
+                    kill[key] = None
+                else:
+                    kill[key] = bool_value == "true"
 
         # Only add if we have required fields
         if "boss" in kill and "timestamp" in kill:
             result["pendingKills"].append(kill)
+        elif kill:
+            print(f"[KILL] Skipping incomplete kill record: {kill}")
 
     return result
 
@@ -404,15 +428,23 @@ def post_kill_report(kill: dict) -> bool:
     return post_to_bot(alert)
 
 
-def check_pending_kills(state: dict) -> None:
+def check_pending_kills(state: dict, verbose: bool = False) -> None:
     """Check SavedVariables for pending kill reports and send them."""
     sv_file = find_savedvariables_file()
 
     if not sv_file:
+        if verbose:
+            print("[KILL] SavedVariables file not found")
         return
+
+    if verbose:
+        print(f"[KILL] Reading SavedVariables: {sv_file}")
 
     data = parse_savedvariables(sv_file)
     pending_kills = data.get("pendingKills", [])
+
+    if verbose and not pending_kills:
+        print("[KILL] No pending kills found in SavedVariables")
 
     if not pending_kills:
         return
@@ -496,7 +528,7 @@ def tail_log_file(state: dict):
             # Periodically check for pending kill reports
             now = time.time()
             if now - last_kill_check >= CONFIG["KILL_REPORT_CHECK_INTERVAL"]:
-                check_pending_kills(state)
+                check_pending_kills(state, verbose=True)
                 last_kill_check = now
 
             # Find the latest combat log file
@@ -655,8 +687,9 @@ def main_loop() -> None:
     # Load state
     state = load_state()
 
-    # Do initial kill report check
-    check_pending_kills(state)
+    # Do initial kill report check (verbose)
+    print("[KILL] Checking for pending kill reports...")
+    check_pending_kills(state, verbose=True)
 
     try:
         for line in tail_log_file(state):
