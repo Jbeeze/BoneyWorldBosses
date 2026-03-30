@@ -224,7 +224,7 @@ def load_state() -> dict:
                 return json.load(f)
         except (json.JSONDecodeError, IOError):
             pass
-    return {"last_inode": 0, "last_pos": 0, "reported_kills": []}
+    return {"last_inode": 0, "last_pos": 0, "reported_kills": [], "last_layer_timestamp": 0}
 
 
 def save_state(state: dict) -> None:
@@ -399,6 +399,115 @@ def mark_kill_reported(kill: dict, state: dict) -> None:
         state["reported_kills"] = state["reported_kills"][-100:]
 
 
+def mark_kill_sent_in_savedvariables(kill: dict) -> bool:
+    """
+    Mark a kill as sent in the SavedVariables file by adding ["sent"] = true.
+    This allows the addon to show correct status on next /reload.
+    Returns True on success.
+    """
+    sv_file = find_savedvariables_file()
+    if not sv_file:
+        return False
+
+    try:
+        with open(sv_file, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+    except IOError as e:
+        print(f"[KILL] Error reading SavedVariables for update: {e}")
+        return False
+
+    # Find this kill by matching boss and timestamp
+    boss = kill.get("boss", "")
+    timestamp = kill.get("timestamp", 0)
+
+    # Build a pattern to find this specific kill entry
+    # We look for a block containing both ["boss"] = "X" and ["timestamp"] = Y
+    # Then add ["sent"] = true if not already present
+
+    # Find all kill entries
+    pending_start = content.find('["pendingKills"]')
+    if pending_start == -1:
+        return False
+
+    data_start = content.find('{', pending_start)
+    if data_start == -1:
+        return False
+
+    # Find the end of pendingKills
+    brace_count = 0
+    data_end = data_start
+    for i in range(data_start, len(content)):
+        if content[i] == '{':
+            brace_count += 1
+        elif content[i] == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                data_end = i
+                break
+
+    pending_section = content[data_start:data_end + 1]
+
+    # Find and update the matching kill entry
+    modified = False
+    new_pending = pending_section
+
+    # Find each kill block
+    i = 0
+    while i < len(pending_section):
+        entry_start = pending_section.find('{', i)
+        if entry_start == -1:
+            break
+
+        # Find matching close brace
+        brace_count = 0
+        entry_end = entry_start
+        for j in range(entry_start, len(pending_section)):
+            if pending_section[j] == '{':
+                brace_count += 1
+            elif pending_section[j] == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    entry_end = j
+                    break
+
+        kill_block = pending_section[entry_start:entry_end + 1]
+
+        # Check if this is our kill
+        boss_match = f'["boss"] = "{boss}"' in kill_block
+        timestamp_match = f'["timestamp"] = {timestamp}' in kill_block
+
+        if boss_match and timestamp_match:
+            # Check if already has ["sent"] = true
+            if '["sent"] = true' not in kill_block:
+                # Add sent = true before the closing brace
+                # Find the last field and add after it
+                new_block = kill_block[:-1].rstrip()
+                if not new_block.endswith(','):
+                    new_block += ','
+                new_block += '\n\t\t\t["sent"] = true,\n\t\t}'
+
+                new_pending = new_pending[:entry_start] + new_block + new_pending[entry_end + 1:]
+                modified = True
+                break
+
+        i = entry_end + 1
+
+    if modified:
+        # Rebuild the full content
+        new_content = content[:data_start] + new_pending + content[data_end + 1:]
+
+        try:
+            with open(sv_file, "w", encoding="utf-8") as f:
+                f.write(new_content)
+            print(f"[KILL] Marked kill as sent in SavedVariables")
+            return True
+        except IOError as e:
+            print(f"[KILL] Error writing SavedVariables: {e}")
+            return False
+
+    return True  # Already marked or not found
+
+
 def post_kill_report(kill: dict) -> bool:
     """Post a kill report to the Discord bot."""
     boss_key = kill.get("boss", "unknown")
@@ -488,6 +597,8 @@ def check_pending_kills(state: dict, verbose: bool = False) -> None:
             if post_kill_report(kill):
                 mark_kill_reported(kill, state)
                 save_state(state)
+                # Also mark as sent in SavedVariables so addon shows correct status
+                mark_kill_sent_in_savedvariables(kill)
                 print(f"[KILL] Successfully reported kill")
             else:
                 print(f"[KILL] Failed to report kill, will retry later")
@@ -496,6 +607,156 @@ def check_pending_kills(state: dict, verbose: bool = False) -> None:
 
     finally:
         _checking_kills = False
+
+
+# =============================================================================
+# LAYER SNAPSHOT HANDLING
+# =============================================================================
+
+def parse_layer_snapshot(path: str, verbose: bool = False) -> dict | None:
+    """Parse layerSnapshot from SavedVariables. Returns dict or None."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+    except IOError:
+        return None
+
+    # Find layerSnapshot section
+    snap_start = content.find('["layerSnapshot"]')
+    if snap_start == -1:
+        return None
+
+    # Find the opening brace of the snapshot table
+    data_start = content.find('{', snap_start)
+    if data_start == -1:
+        return None
+
+    # Find matching closing brace using brace counting
+    brace_count = 0
+    data_end = data_start
+    for i in range(data_start, len(content)):
+        if content[i] == '{':
+            brace_count += 1
+        elif content[i] == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                data_end = i
+                break
+
+    snapshot_str = content[data_start:data_end + 1]
+
+    # Extract timestamp
+    ts_match = re.search(r'\["timestamp"\]\s*=\s*(\d+)', snapshot_str)
+    timestamp = int(ts_match.group(1)) if ts_match else 0
+
+    # Extract trigger
+    trigger_match = re.search(r'\["trigger"\]\s*=\s*"([^"]*)"', snapshot_str)
+    trigger = trigger_match.group(1) if trigger_match else "unknown"
+
+    # Extract zones table
+    zones_start = snapshot_str.find('["zones"]')
+    if zones_start == -1:
+        if verbose:
+            print("[LAYER] No zones table in snapshot")
+        return None
+
+    # Find the zones table opening brace
+    zones_brace = snapshot_str.find('{', zones_start)
+    if zones_brace == -1:
+        return None
+
+    # Find matching closing brace for zones
+    brace_count = 0
+    zones_end = zones_brace
+    for i in range(zones_brace, len(snapshot_str)):
+        if snapshot_str[i] == '{':
+            brace_count += 1
+        elif snapshot_str[i] == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                zones_end = i
+                break
+
+    zones_str = snapshot_str[zones_brace:zones_end + 1]
+
+    # Parse each zone: ["mapId"] = { ["layerNum"] = "instanceId", ... }
+    zones = {}
+    zone_pattern = re.compile(r'\["(\d+)"\]\s*=\s*\{([^}]*)\}')
+    for zone_match in zone_pattern.finditer(zones_str):
+        map_id = zone_match.group(1)
+        zone_content = zone_match.group(2)
+        layers = {}
+        for layer_match in re.finditer(r'\["(\d+)"\]\s*=\s*"(\d+)"', zone_content):
+            layers[layer_match.group(1)] = layer_match.group(2)
+        zones[map_id] = layers
+
+    if verbose:
+        print(f"[LAYER] Parsed snapshot: trigger={trigger}, timestamp={timestamp}, {len(zones)} zone(s)")
+
+    return {
+        "timestamp": timestamp,
+        "trigger": trigger,
+        "zones": zones,
+    }
+
+
+_checking_layers = False
+
+
+def check_layer_snapshot(state: dict, verbose: bool = False) -> None:
+    """Check SavedVariables for new layer snapshot and send LAYER_UPDATE webhooks."""
+    global _checking_layers
+    if _checking_layers:
+        return
+    _checking_layers = True
+
+    try:
+        sv_file = find_savedvariables_file()
+        if not sv_file:
+            return
+
+        snapshot = parse_layer_snapshot(sv_file, verbose=verbose)
+        if not snapshot:
+            if verbose:
+                print("[LAYER] No layer snapshot found in SavedVariables")
+            return
+
+        last_ts = state.get("last_layer_timestamp", 0)
+        if snapshot["timestamp"] <= last_ts:
+            if verbose:
+                print(f"[LAYER] Snapshot timestamp {snapshot['timestamp']} already sent (last: {last_ts})")
+            return
+
+        trigger = snapshot["trigger"]
+        zones = snapshot["zones"]
+
+        print(f"[LAYER] New layer snapshot detected (trigger: {trigger}, {len(zones)} zone(s))")
+
+        all_sent = True
+        for map_id, layers in sorted(zones.items()):
+            alert = {
+                "alertType": "LAYER_UPDATE",
+                "trigger": trigger,
+                "zone": map_id,
+                "layers": layers,
+            }
+
+            layer_count = len(layers)
+            print(f"[LAYER] Sending LAYER_UPDATE for zone {map_id}: {layer_count} layer(s)")
+            if not post_to_bot(alert):
+                print(f"[LAYER] Failed to send zone {map_id} layer update")
+                all_sent = False
+                break
+
+        if all_sent:
+            state["last_layer_timestamp"] = snapshot["timestamp"]
+            save_state(state)
+            print(f"[LAYER] Layer snapshot processed successfully")
+        else:
+            print(f"[LAYER] Layer snapshot partially failed, will retry")
+
+    finally:
+        _checking_layers = False
 
 
 # =============================================================================
@@ -553,6 +814,7 @@ def tail_log_file(state: dict):
             now = time.time()
             if now - last_kill_check >= CONFIG["KILL_REPORT_CHECK_INTERVAL"]:
                 check_pending_kills(state, verbose=False)
+                check_layer_snapshot(state, verbose=False)
                 last_kill_check = now
 
             # Find the latest combat log file
@@ -714,6 +976,10 @@ def main_loop() -> None:
     # Do initial kill report check (verbose)
     print("[KILL] Checking for pending kill reports...")
     check_pending_kills(state, verbose=True)
+
+    # Do initial layer snapshot check (verbose)
+    print("[LAYER] Checking for layer snapshot...")
+    check_layer_snapshot(state, verbose=True)
 
     try:
         for line in tail_log_file(state):

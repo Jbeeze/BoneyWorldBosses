@@ -34,6 +34,9 @@ local DB_DEFAULTS = {
     pendingKills = {},
     -- pendingKills format:
     -- { boss = "kazzak", time = "11:35am", layer = "2", layerId = "31401", timestamp = 1711043445 }
+    layerSnapshot = nil,
+    -- layerSnapshot format:
+    -- { timestamp = 1711043445, trigger = "login", zones = { ["1944"] = { ["1"] = "106045" } } }
 }
 
 -- Reference to saved variables (set on ADDON_LOADED)
@@ -93,45 +96,192 @@ local function FormatTimeServerTime()
 end
 
 -- Get layer from NWB addon if available, otherwise "?"
+-- Debug flag for verbose layer lookup output
+local debugLayerLookup = false
+
 local function GetCurrentLayer(layerId)
     if not NWB then
+        if debugLayerLookup then
+            print("[WBA Debug] NWB addon not loaded")
+        end
         return "?"
     end
 
     -- Try multiple ways to get layer from NWB
-    -- Method 1: Direct currentLayer
+
+    -- Method 1: Direct currentLayer (most reliable when player is on a known layer)
     if NWB.currentLayer and NWB.currentLayer > 0 then
+        if debugLayerLookup then
+            print("[WBA Debug] Found via NWB.currentLayer: " .. tostring(NWB.currentLayer))
+        end
         return tostring(NWB.currentLayer)
     end
 
-    -- Method 2: Look up layer by instance ID in NWB's layer map
+    -- Method 2: currentLayerShared (shared layer info)
+    if NWB.currentLayerShared and NWB.currentLayerShared > 0 then
+        if debugLayerLookup then
+            print("[WBA Debug] Found via NWB.currentLayerShared: " .. tostring(NWB.currentLayerShared))
+        end
+        return tostring(NWB.currentLayerShared)
+    end
+
+    -- Method 3: Look up layer by instance ID in NWB's layer map
     if layerId and NWB.data and NWB.data.layers then
-        for layer, data in pairs(NWB.data.layers) do
-            if data and tostring(data.GUID or "") == tostring(layerId) then
-                return tostring(layer)
-            end
-            -- Also check layerMap if it exists
-            if data and data.layerMap then
-                for zoneId, instId in pairs(data.layerMap) do
-                    if tostring(instId) == tostring(layerId) then
-                        return tostring(layer)
+        if debugLayerLookup then
+            print("[WBA Debug] Searching NWB.data.layers for instanceId: " .. tostring(layerId))
+        end
+        for layerNum, layerData in pairs(NWB.data.layers) do
+            if layerData then
+                -- Check if layer key itself matches the instanceId (some versions use this)
+                if tostring(layerNum) == tostring(layerId) then
+                    -- layerNum is the instanceId, need to find the actual layer number
+                    -- In this case, we'd need to count layers or use a different method
+                    if debugLayerLookup then
+                        print("[WBA Debug] Layer key matches instanceId, checking for layerNum field")
+                    end
+                    if layerData.layerNum then
+                        return tostring(layerData.layerNum)
+                    end
+                end
+
+                -- Check GUID field
+                if layerData.GUID and tostring(layerData.GUID) == tostring(layerId) then
+                    if debugLayerLookup then
+                        print("[WBA Debug] Found via GUID match in layer " .. tostring(layerNum))
+                    end
+                    return tostring(layerNum)
+                end
+
+                -- Check layerMap (zone -> instanceId mapping)
+                if layerData.layerMap then
+                    for zoneId, instId in pairs(layerData.layerMap) do
+                        if tostring(instId) == tostring(layerId) then
+                            if debugLayerLookup then
+                                print("[WBA Debug] Found via layerMap match: zone " .. tostring(zoneId) .. " -> layer " .. tostring(layerNum))
+                            end
+                            return tostring(layerNum)
+                        end
                     end
                 end
             end
         end
     end
 
-    -- Method 3: Try NWB's lastKnownLayer
+    -- Method 4: Check if NWB stores layers keyed by instanceId directly
+    if layerId and NWB.data and NWB.data.layers and NWB.data.layers[tonumber(layerId)] then
+        local layerData = NWB.data.layers[tonumber(layerId)]
+        if layerData and layerData.layerNum then
+            if debugLayerLookup then
+                print("[WBA Debug] Found via direct instanceId key lookup: " .. tostring(layerData.layerNum))
+            end
+            return tostring(layerData.layerNum)
+        end
+    end
+
+    -- Method 5: Try NWB's lastKnownLayer
     if NWB.lastKnownLayer and NWB.lastKnownLayer > 0 then
+        if debugLayerLookup then
+            print("[WBA Debug] Found via NWB.lastKnownLayer: " .. tostring(NWB.lastKnownLayer))
+        end
         return tostring(NWB.lastKnownLayer)
     end
 
-    -- Method 4: Try lastKnownLayerNum
+    -- Method 6: Try lastKnownLayerNum
     if NWB.lastKnownLayerNum and NWB.lastKnownLayerNum > 0 then
+        if debugLayerLookup then
+            print("[WBA Debug] Found via NWB.lastKnownLayerNum: " .. tostring(NWB.lastKnownLayerNum))
+        end
         return tostring(NWB.lastKnownLayerNum)
     end
 
+    -- Method 7: Try lastKnownLayerID and match it
+    if NWB.lastKnownLayerID and tostring(NWB.lastKnownLayerID) == tostring(layerId) then
+        -- We know the player was on this layer, but we need the layer number
+        -- Fall through to check if there's a layerNum stored elsewhere
+        if debugLayerLookup then
+            print("[WBA Debug] lastKnownLayerID matches but no layer number found")
+        end
+    end
+
+    if debugLayerLookup then
+        print("[WBA Debug] No layer found, returning ?")
+    end
     return "?"
+end
+
+-- =============================================================================
+-- LAYER SNAPSHOT
+-- =============================================================================
+
+-- Sorted pairs iterator (matches NWB's layer numbering)
+local function pairsByKeys(t)
+    local keys = {}
+    for k in pairs(t) do
+        table.insert(keys, k)
+    end
+    table.sort(keys)
+    local i = 0
+    return function()
+        i = i + 1
+        if keys[i] then
+            return keys[i], t[keys[i]]
+        end
+    end
+end
+
+local function BuildLayerSnapshot(trigger)
+    if not NWB or not NWB.data or not NWB.data.layers then
+        return nil
+    end
+
+    -- zones[uiMapId][layerNum] = zoneInstanceId
+    local zones = {}
+    local layerCount = 0
+
+    for layerKey, layerData in pairsByKeys(NWB.data.layers) do
+        layerCount = layerCount + 1
+        if layerData.layerMap then
+            for zoneInstId, uiMapId in pairs(layerData.layerMap) do
+                if type(uiMapId) == "number" then -- skip "created" key
+                    local mapKey = tostring(uiMapId)
+                    if not zones[mapKey] then
+                        zones[mapKey] = {}
+                    end
+                    zones[mapKey][tostring(layerCount)] = tostring(zoneInstId)
+                end
+            end
+        end
+    end
+
+    return {
+        timestamp = time(),
+        trigger = trigger,
+        zones = zones,
+    }
+end
+
+local function WriteLayerSnapshot(trigger)
+    if not db then return false end
+
+    local snapshot = BuildLayerSnapshot(trigger)
+    if not snapshot then
+        print("|cff00ff00[WorldBossAnnouncer]|r NWB layer data not available.")
+        return false
+    end
+
+    db.layerSnapshot = snapshot
+
+    -- Print summary
+    local zoneCount = 0
+    local totalMappings = 0
+    for _, layers in pairs(snapshot.zones) do
+        zoneCount = zoneCount + 1
+        for _ in pairs(layers) do
+            totalMappings = totalMappings + 1
+        end
+    end
+    print("|cff00ff00[WorldBossAnnouncer]|r Layer snapshot saved (" .. trigger .. "): " .. zoneCount .. " zone(s), " .. totalMappings .. " mapping(s)")
+    return true
 end
 
 -- =============================================================================
@@ -258,6 +408,25 @@ StaticPopupDialogs["WBA_CONFIRM_KILL_REPORT"] = {
     timeout = 0,
     whileDead = true,
     hideOnEscape = false,
+    preferredIndex = 3,
+}
+
+StaticPopupDialogs["WBA_CONFIRM_LAYER_SNAPSHOT"] = {
+    text = "Layer Update\n\nThis will snapshot current NWB layer data and reload your UI to send it to Discord.\n\n|cffff8800Warning:|r This will reload your UI.",
+    button1 = "Send Layer Update",
+    button2 = "Cancel",
+    OnAccept = function()
+        if WriteLayerSnapshot("manual") then
+            print("|cff00ff00[WorldBossAnnouncer]|r Reloading UI to flush layer snapshot...")
+            ReloadUI()
+        end
+    end,
+    OnCancel = function()
+        print("|cff00ff00[WorldBossAnnouncer]|r Layer snapshot cancelled.")
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
     preferredIndex = 3,
 }
 
@@ -495,21 +664,174 @@ local function SlashHandler(msg)
         print("  Log file: WoW/_anniversary_/Logs/WoWCombatLog.txt")
 
     elseif cmd == "pending" then
+        -- Legacy alias for /wba log status
+        print("|cff00ff00[WorldBossAnnouncer]|r Use /wba log status instead.")
+        -- Fall through to show status anyway
         if #db.pendingKills == 0 then
-            print("|cff00ff00[WorldBossAnnouncer]|r No pending kill reports.")
+            print("|cff00ff00[WorldBossAnnouncer]|r No kill reports.")
         else
-            print("|cff00ff00[WorldBossAnnouncer]|r Pending kill reports:")
+            print("|cff00ff00[WorldBossAnnouncer]|r Kill reports:")
             for i, kill in ipairs(db.pendingKills) do
                 local displayName = BOSS_DISPLAY_NAMES[kill.boss] or kill.boss
-                print(string.format("  %d. %s - %s ST - Layer %s (%s)",
-                    i, displayName, kill.time, kill.layer, kill.layerId))
+                local status = kill.sent and "|cff00ff00sent|r" or "|cffffcc00pending|r"
+                print(string.format("  %d. [%s] %s - %s ST - Layer %s (%s)",
+                    i, status, displayName, kill.time, kill.layer, kill.layerId))
             end
-            print("|cff00ff00[WorldBossAnnouncer]|r Type /reload to send these reports.")
         end
 
     elseif cmd == "clear" then
+        -- Legacy alias for /wba log clear
         db.pendingKills = {}
         print("|cff00ff00[WorldBossAnnouncer]|r Pending kill reports cleared.")
+
+    elseif cmd == "log" then
+        local subcmd = args[2]
+        if subcmd == "status" then
+            if #db.pendingKills == 0 then
+                print("|cff00ff00[WorldBossAnnouncer]|r No kill reports.")
+            else
+                print("|cff00ff00[WorldBossAnnouncer]|r Kill reports:")
+                local pendingCount = 0
+                local sentCount = 0
+                for i, kill in ipairs(db.pendingKills) do
+                    local displayName = BOSS_DISPLAY_NAMES[kill.boss] or kill.boss
+                    local status
+                    if kill.sent then
+                        status = "|cff00ff00sent|r"
+                        sentCount = sentCount + 1
+                    else
+                        status = "|cffffcc00pending|r"
+                        pendingCount = pendingCount + 1
+                    end
+                    print(string.format("  %d. [%s] %s - %s ST - Layer %s (%s)",
+                        i, status, displayName, kill.time, kill.layer, kill.layerId))
+                end
+                print("|cff00ff00[WorldBossAnnouncer]|r Total: " .. pendingCount .. " pending, " .. sentCount .. " sent")
+                if pendingCount > 0 then
+                    print("|cff00ff00[WorldBossAnnouncer]|r Type /reload to send pending reports.")
+                end
+            end
+
+        elseif subcmd == "clear" then
+            local range = args[3]
+            if not range then
+                -- Clear all
+                local count = #db.pendingKills
+                db.pendingKills = {}
+                print("|cff00ff00[WorldBossAnnouncer]|r Cleared all " .. count .. " kill report(s).")
+            else
+                -- Parse range like "1-3" or single number like "2"
+                local startIdx, endIdx = string.match(range, "(%d+)-(%d+)")
+                if startIdx and endIdx then
+                    startIdx = tonumber(startIdx)
+                    endIdx = tonumber(endIdx)
+                else
+                    -- Single number
+                    startIdx = tonumber(range)
+                    endIdx = startIdx
+                end
+
+                if not startIdx or not endIdx then
+                    print("|cff00ff00[WorldBossAnnouncer]|r Invalid range. Use: /wba log clear [N] or /wba log clear [N-M]")
+                    return
+                end
+
+                -- Validate range
+                local total = #db.pendingKills
+                if startIdx < 1 or endIdx > total or startIdx > endIdx then
+                    print("|cff00ff00[WorldBossAnnouncer]|r Invalid range. You have " .. total .. " kill report(s).")
+                    return
+                end
+
+                -- Remove from end to start to preserve indices
+                local removed = 0
+                for i = endIdx, startIdx, -1 do
+                    table.remove(db.pendingKills, i)
+                    removed = removed + 1
+                end
+                print("|cff00ff00[WorldBossAnnouncer]|r Cleared " .. removed .. " kill report(s). " .. #db.pendingKills .. " remaining.")
+            end
+
+        elseif subcmd == "update" then
+            local idx = tonumber(args[3])
+            local field = args[4] and string.lower(args[4]) or nil
+            local value = args[5]
+
+            if not idx then
+                print("|cff00ff00[WorldBossAnnouncer]|r Usage: /wba log update <#> <field> <value>")
+                print("  Fields: layer, layerid, time, boss, status")
+                print("  Example: /wba log update 1 layer 3")
+                print("  Example: /wba log update 2 time 11:35am")
+                print("  Example: /wba log update 1 status sent")
+                return
+            end
+
+            if idx < 1 or idx > #db.pendingKills then
+                print("|cff00ff00[WorldBossAnnouncer]|r Invalid index. You have " .. #db.pendingKills .. " kill report(s).")
+                return
+            end
+
+            local kill = db.pendingKills[idx]
+            local displayName = BOSS_DISPLAY_NAMES[kill.boss] or kill.boss
+
+            if not field or not value then
+                -- Show usage
+                print("|cff00ff00[WorldBossAnnouncer]|r Usage: /wba log update " .. idx .. " <field> <value>")
+                print("  Fields: layer, layerid, time, boss, status")
+                return
+            end
+
+            -- Update the field
+            if field == "layer" then
+                local oldValue = kill.layer
+                kill.layer = value
+                print("|cff00ff00[WorldBossAnnouncer]|r Updated kill #" .. idx .. " layer: " .. tostring(oldValue) .. " -> " .. value)
+            elseif field == "layerid" then
+                local oldValue = kill.layerId
+                kill.layerId = value
+                print("|cff00ff00[WorldBossAnnouncer]|r Updated kill #" .. idx .. " layerId: " .. tostring(oldValue) .. " -> " .. value)
+            elseif field == "time" then
+                local oldValue = kill.time
+                kill.time = value
+                print("|cff00ff00[WorldBossAnnouncer]|r Updated kill #" .. idx .. " time: " .. tostring(oldValue) .. " -> " .. value)
+            elseif field == "boss" then
+                local oldValue = kill.boss
+                -- Accept common variations
+                local bossKey = string.lower(value)
+                if bossKey == "kazzak" or bossKey == "kaz" or bossKey == "dlk" then
+                    bossKey = "kazzak"
+                elseif bossKey == "doomwalker" or bossKey == "doom" or bossKey == "dw" then
+                    bossKey = "doomwalker"
+                end
+                kill.boss = bossKey
+                print("|cff00ff00[WorldBossAnnouncer]|r Updated kill #" .. idx .. " boss: " .. tostring(oldValue) .. " -> " .. bossKey)
+            elseif field == "status" then
+                local oldStatus = kill.sent and "sent" or "pending"
+                local newValue = string.lower(value)
+                if newValue == "sent" or newValue == "s" then
+                    kill.sent = true
+                    print("|cff00ff00[WorldBossAnnouncer]|r Updated kill #" .. idx .. " status: " .. oldStatus .. " -> sent")
+                elseif newValue == "pending" or newValue == "p" then
+                    kill.sent = nil
+                    print("|cff00ff00[WorldBossAnnouncer]|r Updated kill #" .. idx .. " status: " .. oldStatus .. " -> pending")
+                else
+                    print("|cff00ff00[WorldBossAnnouncer]|r Invalid status. Use: sent, pending")
+                end
+            else
+                print("|cff00ff00[WorldBossAnnouncer]|r Unknown field: " .. field)
+                print("  Valid fields: layer, layerid, time, boss, status")
+            end
+
+        else
+            print("|cff00ff00[WorldBossAnnouncer]|r Log commands:")
+            print("  /wba log status      - Show all kill reports with status")
+            print("  /wba log clear       - Clear all kill reports")
+            print("  /wba log clear N     - Clear kill report #N")
+            print("  /wba log clear N-M   - Clear kill reports #N through #M")
+            print("  /wba log update # <field> <value> - Update a field")
+            print("    Fields: layer, layerid, time, boss, status")
+            print("    Example: /wba log update 1 layer 3")
+        end
 
     elseif cmd == "options" or cmd == "config" or cmd == "settings" then
         InterfaceOptionsFrame_OpenToCategory("WorldBossAnnouncer")
@@ -525,16 +847,92 @@ local function SlashHandler(msg)
             print("  NWB.currentLayer: " .. tostring(NWB.currentLayer or "nil"))
             print("  NWB.lastKnownLayer: " .. tostring(NWB.lastKnownLayer or "nil"))
             print("  NWB.lastKnownLayerNum: " .. tostring(NWB.lastKnownLayerNum or "nil"))
+            -- Check for layer frame
+            if NWB.currentLayerShared then
+                print("  NWB.currentLayerShared: " .. tostring(NWB.currentLayerShared))
+            end
+            if NWB.lastKnownLayerID then
+                print("  NWB.lastKnownLayerID: " .. tostring(NWB.lastKnownLayerID))
+            end
             if NWB.data and NWB.data.layers then
                 print("  NWB.data.layers:")
-                for layer, data in pairs(NWB.data.layers) do
-                    local guid = data and data.GUID or "?"
-                    print("    Layer " .. tostring(layer) .. ": GUID=" .. tostring(guid))
+                local layerCount = 0
+                for layerNum, layerData in pairs(NWB.data.layers) do
+                    layerCount = layerCount + 1
+                    print("    Layer " .. tostring(layerNum) .. ":")
+                    if layerData then
+                        -- Show GUID if present
+                        if layerData.GUID then
+                            print("      GUID: " .. tostring(layerData.GUID))
+                        end
+                        -- Show layerMap (zone -> instanceId mapping)
+                        if layerData.layerMap then
+                            print("      layerMap:")
+                            local mapCount = 0
+                            for zoneId, instId in pairs(layerData.layerMap) do
+                                mapCount = mapCount + 1
+                                if mapCount <= 5 then  -- Limit output
+                                    print("        zone " .. tostring(zoneId) .. " -> instId " .. tostring(instId))
+                                end
+                            end
+                            if mapCount > 5 then
+                                print("        ... and " .. (mapCount - 5) .. " more zones")
+                            end
+                        end
+                        -- Show created timestamp if present
+                        if layerData.created then
+                            print("      created: " .. tostring(layerData.created))
+                        end
+                    end
+                end
+                if layerCount == 0 then
+                    print("    (empty)")
                 end
             else
                 print("  NWB.data.layers: nil")
             end
+            -- Also check NWB.data.layerMap directly if it exists
+            if NWB.data and NWB.data.layerMap then
+                print("  NWB.data.layerMap (direct):")
+                local count = 0
+                for k, v in pairs(NWB.data.layerMap) do
+                    count = count + 1
+                    if count <= 3 then
+                        print("    " .. tostring(k) .. " -> " .. tostring(v))
+                    end
+                end
+                if count > 3 then
+                    print("    ... and " .. (count - 3) .. " more")
+                end
+            end
         end
+
+    elseif cmd == "debug" then
+        local subcmd = args[2]
+        if subcmd == "layer" then
+            debugLayerLookup = not debugLayerLookup
+            print("|cff00ff00[WorldBossAnnouncer]|r Layer lookup debug: " .. (debugLayerLookup and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
+        elseif subcmd == "lookup" then
+            -- Test layer lookup with a specific instanceId
+            local testId = args[3]
+            if testId then
+                debugLayerLookup = true  -- Temporarily enable debug
+                print("|cff00ff00[WorldBossAnnouncer]|r Testing layer lookup for instanceId: " .. testId)
+                local result = GetCurrentLayer(testId)
+                print("|cff00ff00[WorldBossAnnouncer]|r Result: Layer " .. result)
+                debugLayerLookup = false  -- Disable debug
+            else
+                print("|cff00ff00[WorldBossAnnouncer]|r Usage: /wba debug lookup <instanceId>")
+                print("  Example: /wba debug lookup 79466")
+            end
+        else
+            print("|cff00ff00[WorldBossAnnouncer]|r Debug commands:")
+            print("  /wba debug layer - Toggle verbose layer lookup debugging")
+            print("  /wba debug lookup <id> - Test layer lookup for specific instanceId")
+        end
+
+    elseif cmd == "layers" then
+        StaticPopup_Show("WBA_CONFIRM_LAYER_SNAPSHOT")
 
     elseif cmd == "test" then
         local subcmd = args[2]
@@ -565,13 +963,15 @@ local function SlashHandler(msg)
         print("  /wba scout on|off    - Toggle Scout mode (combat logging)")
         print("  /wba reporter on|off - Toggle Reporter mode (kill reports)")
         print("  /wba status          - Show current status")
-        print("  /wba pending         - List pending kill reports")
-        print("  /wba clear           - Clear pending kill reports")
+        print("  /wba log             - Kill report management (status/clear/update)")
         print("  /wba options         - Open settings panel")
         print("  /wba test kill       - Test mode (next creature kill = test report)")
+        print("  /wba layers          - Send layer update to Discord (reloads UI)")
         print("")
-        print("  Scout Mode: Enables combat logging for real-time boss detection")
-        print("  Reporter Mode: Detects boss kills and queues them for Discord")
+        print("  Log commands:")
+        print("    /wba log status    - Show all kill reports with status")
+        print("    /wba log clear     - Clear all (or /wba log clear N or N-M)")
+        print("    /wba log update # <field> <value> - Update kill field")
         print("")
         print("  Settings: ESC > Interface > AddOns > WorldBossAnnouncer")
     end
@@ -587,10 +987,20 @@ SlashCmdList["WORLDBOSSANNOUNCER"] = SlashHandler
 -- =============================================================================
 
 frame:RegisterEvent("ADDON_LOADED")
+frame:RegisterEvent("PLAYER_LOGIN")
+frame:RegisterEvent("PLAYER_LOGOUT")
 frame:SetScript("OnEvent", function(self, event, ...)
     if event == "ADDON_LOADED" then
         OnAddonLoaded(...)
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
         OnCombatLogEvent()
+    elseif event == "PLAYER_LOGIN" then
+        -- Delay to let NWB populate layer data from other players
+        C_Timer.After(5, function()
+            WriteLayerSnapshot("login")
+        end)
+    elseif event == "PLAYER_LOGOUT" then
+        -- SavedVariables auto-flush on logout
+        WriteLayerSnapshot("logout")
     end
 end)
