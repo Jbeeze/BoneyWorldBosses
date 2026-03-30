@@ -588,7 +588,7 @@ local function OnAddonLoaded(addonName)
         print("|cff00ff00[WorldBossAnnouncer]|r " .. pendingCount .. " pending kill report(s). Type /reload to send.")
     end
 
-    print("|cff00ff00[WorldBossAnnouncer]|r Type /wba for commands. ESC > Interface > AddOns for settings.")
+    print("|cff00ff00[WorldBossAnnouncer]|r Type /bwb for commands. ESC > Interface > AddOns for settings.")
 end
 
 -- =============================================================================
@@ -616,7 +616,7 @@ local function SlashHandler(msg)
             isLoggingEnabled = false
             print("|cff00ff00[WorldBossAnnouncer]|r Scout mode |cffff0000DISABLED|r - Combat logging OFF")
         else
-            print("|cff00ff00[WorldBossAnnouncer]|r Usage: /wba scout on/off")
+            print("|cff00ff00[WorldBossAnnouncer]|r Usage: /bwb scout on/off")
         end
 
     elseif cmd == "reporter" then
@@ -630,7 +630,7 @@ local function SlashHandler(msg)
             frame:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
             print("|cff00ff00[WorldBossAnnouncer]|r Reporter mode |cffff0000DISABLED|r")
         else
-            print("|cff00ff00[WorldBossAnnouncer]|r Usage: /wba reporter on/off")
+            print("|cff00ff00[WorldBossAnnouncer]|r Usage: /bwb reporter on/off")
         end
 
     -- Legacy support for old "logging" command
@@ -647,7 +647,7 @@ local function SlashHandler(msg)
             isLoggingEnabled = false
             print("|cff00ff00[WorldBossAnnouncer]|r Combat logging |cffff0000DISABLED|r")
         else
-            print("|cff00ff00[WorldBossAnnouncer]|r Usage: /wba logging on/off")
+            print("|cff00ff00[WorldBossAnnouncer]|r Usage: /bwb logging on/off")
         end
 
     elseif cmd == "status" then
@@ -664,8 +664,8 @@ local function SlashHandler(msg)
         print("  Log file: WoW/_anniversary_/Logs/WoWCombatLog.txt")
 
     elseif cmd == "pending" then
-        -- Legacy alias for /wba log status
-        print("|cff00ff00[WorldBossAnnouncer]|r Use /wba log status instead.")
+        -- Legacy alias for /bwb log status
+        print("|cff00ff00[WorldBossAnnouncer]|r Use /bwb log status instead.")
         -- Fall through to show status anyway
         if #db.pendingKills == 0 then
             print("|cff00ff00[WorldBossAnnouncer]|r No kill reports.")
@@ -680,7 +680,7 @@ local function SlashHandler(msg)
         end
 
     elseif cmd == "clear" then
-        -- Legacy alias for /wba log clear
+        -- Legacy alias for /bwb log clear
         db.pendingKills = {}
         print("|cff00ff00[WorldBossAnnouncer]|r Pending kill reports cleared.")
 
@@ -732,7 +732,7 @@ local function SlashHandler(msg)
                 end
 
                 if not startIdx or not endIdx then
-                    print("|cff00ff00[WorldBossAnnouncer]|r Invalid range. Use: /wba log clear [N] or /wba log clear [N-M]")
+                    print("|cff00ff00[WorldBossAnnouncer]|r Invalid range. Use: /bwb log clear [N] or /bwb log clear [N-M]")
                     return
                 end
 
@@ -758,11 +758,11 @@ local function SlashHandler(msg)
             local value = args[5]
 
             if not idx then
-                print("|cff00ff00[WorldBossAnnouncer]|r Usage: /wba log update <#> <field> <value>")
+                print("|cff00ff00[WorldBossAnnouncer]|r Usage: /bwb log update <#> <field> <value>")
                 print("  Fields: layer, layerid, time, boss, status")
-                print("  Example: /wba log update 1 layer 3")
-                print("  Example: /wba log update 2 time 11:35am")
-                print("  Example: /wba log update 1 status sent")
+                print("  Example: /bwb log update 1 layer 3")
+                print("  Example: /bwb log update 2 time 11:35am")
+                print("  Example: /bwb log update 1 status sent")
                 return
             end
 
@@ -776,7 +776,7 @@ local function SlashHandler(msg)
 
             if not field or not value then
                 -- Show usage
-                print("|cff00ff00[WorldBossAnnouncer]|r Usage: /wba log update " .. idx .. " <field> <value>")
+                print("|cff00ff00[WorldBossAnnouncer]|r Usage: /bwb log update " .. idx .. " <field> <value>")
                 print("  Fields: layer, layerid, time, boss, status")
                 return
             end
@@ -824,13 +824,13 @@ local function SlashHandler(msg)
 
         else
             print("|cff00ff00[WorldBossAnnouncer]|r Log commands:")
-            print("  /wba log status      - Show all kill reports with status")
-            print("  /wba log clear       - Clear all kill reports")
-            print("  /wba log clear N     - Clear kill report #N")
-            print("  /wba log clear N-M   - Clear kill reports #N through #M")
-            print("  /wba log update # <field> <value> - Update a field")
+            print("  /bwb log status      - Show all kill reports with status")
+            print("  /bwb log clear       - Clear all kill reports")
+            print("  /bwb log clear N     - Clear kill report #N")
+            print("  /bwb log clear N-M   - Clear kill reports #N through #M")
+            print("  /bwb log update # <field> <value> - Update a field")
             print("    Fields: layer, layerid, time, boss, status")
-            print("    Example: /wba log update 1 layer 3")
+            print("    Example: /bwb log update 1 layer 3")
         end
 
     elseif cmd == "options" or cmd == "config" or cmd == "settings" then
@@ -922,13 +922,13 @@ local function SlashHandler(msg)
                 print("|cff00ff00[WorldBossAnnouncer]|r Result: Layer " .. result)
                 debugLayerLookup = false  -- Disable debug
             else
-                print("|cff00ff00[WorldBossAnnouncer]|r Usage: /wba debug lookup <instanceId>")
-                print("  Example: /wba debug lookup 79466")
+                print("|cff00ff00[WorldBossAnnouncer]|r Usage: /bwb debug lookup <instanceId>")
+                print("  Example: /bwb debug lookup 79466")
             end
         else
             print("|cff00ff00[WorldBossAnnouncer]|r Debug commands:")
-            print("  /wba debug layer - Toggle verbose layer lookup debugging")
-            print("  /wba debug lookup <id> - Test layer lookup for specific instanceId")
+            print("  /bwb debug layer - Toggle verbose layer lookup debugging")
+            print("  /bwb debug lookup <id> - Test layer lookup for specific instanceId")
         end
 
     elseif cmd == "layers" then
@@ -955,31 +955,31 @@ local function SlashHandler(msg)
             end
         else
             print("|cff00ff00[WorldBossAnnouncer]|r Test commands:")
-            print("  /wba test kill - Arm test mode (next creature kill = test report)")
+            print("  /bwb test kill - Arm test mode (next creature kill = test report)")
         end
 
     else
         print("|cff00ff00[WorldBossAnnouncer]|r v" .. VERSION .. " - World Boss Announcer")
-        print("  /wba scout on|off    - Toggle Scout mode (combat logging)")
-        print("  /wba reporter on|off - Toggle Reporter mode (kill reports)")
-        print("  /wba status          - Show current status")
-        print("  /wba log             - Kill report management (status/clear/update)")
-        print("  /wba options         - Open settings panel")
-        print("  /wba test kill       - Test mode (next creature kill = test report)")
-        print("  /wba layers          - Send layer update to Discord (reloads UI)")
+        print("  /bwb scout on|off    - Toggle Scout mode (combat logging)")
+        print("  /bwb reporter on|off - Toggle Reporter mode (kill reports)")
+        print("  /bwb status          - Show current status")
+        print("  /bwb log             - Kill report management (status/clear/update)")
+        print("  /bwb options         - Open settings panel")
+        print("  /bwb test kill       - Test mode (next creature kill = test report)")
+        print("  /bwb layers          - Send layer update to Discord (reloads UI)")
         print("")
         print("  Log commands:")
-        print("    /wba log status    - Show all kill reports with status")
-        print("    /wba log clear     - Clear all (or /wba log clear N or N-M)")
-        print("    /wba log update # <field> <value> - Update kill field")
+        print("    /bwb log status    - Show all kill reports with status")
+        print("    /bwb log clear     - Clear all (or /bwb log clear N or N-M)")
+        print("    /bwb log update # <field> <value> - Update kill field")
         print("")
         print("  Settings: ESC > Interface > AddOns > WorldBossAnnouncer")
     end
 end
 
 -- Register slash commands
-SLASH_WORLDBOSSANNOUNCER1 = "/worldbossannouncer"
-SLASH_WORLDBOSSANNOUNCER2 = "/wba"
+SLASH_WORLDBOSSANNOUNCER1 = "/boneyworldbosses"
+SLASH_WORLDBOSSANNOUNCER2 = "/bwb"
 SlashCmdList["WORLDBOSSANNOUNCER"] = SlashHandler
 
 -- =============================================================================
