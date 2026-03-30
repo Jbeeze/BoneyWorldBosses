@@ -45,7 +45,22 @@ CONFIG = {
 }
 
 # State file path (same directory as this script)
-STATE_FILE = Path(__file__).parent / "bridge_state.json"
+SCRIPT_DIR = Path(__file__).parent
+STATE_FILE = SCRIPT_DIR / "bridge_state.json"
+
+
+def auto_detect_logs_dir() -> str:
+    """
+    Auto-detect WoW Logs directory from this script's location.
+    Expects: WoW/_anniversary_/Interface/AddOns/<AddonName>/bridge.py
+    Logs at: WoW/_anniversary_/Logs
+    """
+    # Go up from AddOns/<AddonName>/ to _anniversary_/
+    wow_game_dir = SCRIPT_DIR.parent.parent.parent
+    logs_dir = wow_game_dir / "Logs"
+    if logs_dir.is_dir():
+        return str(logs_dir)
+    return ""
 
 # =============================================================================
 # BOSS NPC IDS
@@ -990,13 +1005,20 @@ def main_loop() -> None:
 
 def validate_config() -> bool:
     """Validate configuration before starting."""
+    # Auto-detect LOGS_DIR if not manually set
+    if not CONFIG["LOGS_DIR"]:
+        detected = auto_detect_logs_dir()
+        if detected:
+            CONFIG["LOGS_DIR"] = detected
+            print(f"[CONFIG] Auto-detected Logs directory: {detected}")
+
     errors = []
 
     if not CONFIG["BOT_API_URL"]:
         errors.append("BOT_API_URL is not set")
 
     if not CONFIG["LOGS_DIR"]:
-        errors.append("LOGS_DIR is not set")
+        errors.append("LOGS_DIR is not set (could not auto-detect from script location)")
     elif not os.path.isdir(CONFIG["LOGS_DIR"]):
         errors.append(f"LOGS_DIR does not exist: {CONFIG['LOGS_DIR']}")
 
