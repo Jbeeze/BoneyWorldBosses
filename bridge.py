@@ -29,6 +29,9 @@ CONFIG = {
     # Render: https://worldbosstrackerdiscordbot.onrender.com
     "BOT_API_URL": "https://worldbosstrackerdiscordbot.onrender.com",
 
+    # Discord guild/server ID (required)
+    "GUILD_ID": "",
+
     # Path to WoW Logs directory (NOT the specific file!)
     # macOS: /Applications/World of Warcraft/_anniversary_/Logs
     # Windows: C:/Program Files/World of Warcraft/_anniversary_/Logs
@@ -206,6 +209,7 @@ def post_to_bot(alert: dict) -> bool:
         return False
 
     api_url = CONFIG["BOT_API_URL"].rstrip("/") + "/webhook/alert"
+    alert["guildId"] = CONFIG["GUILD_ID"]
 
     try:
         response = requests.post(api_url, json=alert, timeout=10)
@@ -1005,6 +1009,9 @@ def validate_config() -> bool:
 
     if not CONFIG["BOT_API_URL"]:
         errors.append("BOT_API_URL is not set")
+
+    if not CONFIG["GUILD_ID"]:
+        errors.append("GUILD_ID is not set (set it to your Discord server ID in bridge.py)")
 
     if not CONFIG["LOGS_DIR"]:
         errors.append("LOGS_DIR is not set (could not auto-detect from script location)")
