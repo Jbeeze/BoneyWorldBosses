@@ -1,11 +1,15 @@
--- BoneyWorldBosses: Boney World Bosses for Discord (v3.1)
+-- BoneyWorldBosses: Boney World Bosses for Discord (v3.2)
 -- Target: TBC Anniversary (Interface 20504)
 -- Features:
 --   Scout Mode: Combat logging for real-time boss detection
 --   Reporter Mode: Kill detection and reporting to Discord
+--   Layer Updates: NWB layer data reporting to Discord
 
 local ADDON_NAME = "BoneyWorldBosses"
-local VERSION = "3.1.0"
+local VERSION = "3.2.0"
+
+-- Create AceAddon (NWB bundles LibStub + AceAddon-3.0)
+local BWB = LibStub("AceAddon-3.0"):NewAddon(ADDON_NAME)
 
 -- =============================================================================
 -- BOSS DATA
@@ -100,7 +104,8 @@ end
 local debugLayerLookup = false
 
 local function GetCurrentLayer(layerId)
-    if not NWB then
+    local nwb = GetNWB()
+    if not nwb then
         if debugLayerLookup then
             print("[WBA Debug] NWB addon not loaded")
         end
@@ -110,32 +115,29 @@ local function GetCurrentLayer(layerId)
     -- Try multiple ways to get layer from NWB
 
     -- Method 1: Direct currentLayer (most reliable when player is on a known layer)
-    if NWB.currentLayer and NWB.currentLayer > 0 then
+    if nwb.currentLayer and nwb.currentLayer > 0 then
         if debugLayerLookup then
-            print("[WBA Debug] Found via NWB.currentLayer: " .. tostring(NWB.currentLayer))
+            print("[WBA Debug] Found via NWB.currentLayer: " .. tostring(nwb.currentLayer))
         end
-        return tostring(NWB.currentLayer)
+        return tostring(nwb.currentLayer)
     end
 
     -- Method 2: currentLayerShared (shared layer info)
-    if NWB.currentLayerShared and NWB.currentLayerShared > 0 then
+    if nwb.currentLayerShared and nwb.currentLayerShared > 0 then
         if debugLayerLookup then
-            print("[WBA Debug] Found via NWB.currentLayerShared: " .. tostring(NWB.currentLayerShared))
+            print("[WBA Debug] Found via NWB.currentLayerShared: " .. tostring(nwb.currentLayerShared))
         end
-        return tostring(NWB.currentLayerShared)
+        return tostring(nwb.currentLayerShared)
     end
 
     -- Method 3: Look up layer by instance ID in NWB's layer map
-    if layerId and NWB.data and NWB.data.layers then
+    if layerId and nwb.data and nwb.data.layers then
         if debugLayerLookup then
             print("[WBA Debug] Searching NWB.data.layers for instanceId: " .. tostring(layerId))
         end
-        for layerNum, layerData in pairs(NWB.data.layers) do
+        for layerNum, layerData in pairs(nwb.data.layers) do
             if layerData then
-                -- Check if layer key itself matches the instanceId (some versions use this)
                 if tostring(layerNum) == tostring(layerId) then
-                    -- layerNum is the instanceId, need to find the actual layer number
-                    -- In this case, we'd need to count layers or use a different method
                     if debugLayerLookup then
                         print("[WBA Debug] Layer key matches instanceId, checking for layerNum field")
                     end
@@ -144,7 +146,6 @@ local function GetCurrentLayer(layerId)
                     end
                 end
 
-                -- Check GUID field
                 if layerData.GUID and tostring(layerData.GUID) == tostring(layerId) then
                     if debugLayerLookup then
                         print("[WBA Debug] Found via GUID match in layer " .. tostring(layerNum))
@@ -152,7 +153,6 @@ local function GetCurrentLayer(layerId)
                     return tostring(layerNum)
                 end
 
-                -- Check layerMap (zone -> instanceId mapping)
                 if layerData.layerMap then
                     for zoneId, instId in pairs(layerData.layerMap) do
                         if tostring(instId) == tostring(layerId) then
@@ -168,8 +168,8 @@ local function GetCurrentLayer(layerId)
     end
 
     -- Method 4: Check if NWB stores layers keyed by instanceId directly
-    if layerId and NWB.data and NWB.data.layers and NWB.data.layers[tonumber(layerId)] then
-        local layerData = NWB.data.layers[tonumber(layerId)]
+    if layerId and nwb.data and nwb.data.layers and nwb.data.layers[tonumber(layerId)] then
+        local layerData = nwb.data.layers[tonumber(layerId)]
         if layerData and layerData.layerNum then
             if debugLayerLookup then
                 print("[WBA Debug] Found via direct instanceId key lookup: " .. tostring(layerData.layerNum))
@@ -179,25 +179,23 @@ local function GetCurrentLayer(layerId)
     end
 
     -- Method 5: Try NWB's lastKnownLayer
-    if NWB.lastKnownLayer and NWB.lastKnownLayer > 0 then
+    if nwb.lastKnownLayer and nwb.lastKnownLayer > 0 then
         if debugLayerLookup then
-            print("[WBA Debug] Found via NWB.lastKnownLayer: " .. tostring(NWB.lastKnownLayer))
+            print("[WBA Debug] Found via NWB.lastKnownLayer: " .. tostring(nwb.lastKnownLayer))
         end
-        return tostring(NWB.lastKnownLayer)
+        return tostring(nwb.lastKnownLayer)
     end
 
     -- Method 6: Try lastKnownLayerNum
-    if NWB.lastKnownLayerNum and NWB.lastKnownLayerNum > 0 then
+    if nwb.lastKnownLayerNum and nwb.lastKnownLayerNum > 0 then
         if debugLayerLookup then
-            print("[WBA Debug] Found via NWB.lastKnownLayerNum: " .. tostring(NWB.lastKnownLayerNum))
+            print("[WBA Debug] Found via NWB.lastKnownLayerNum: " .. tostring(nwb.lastKnownLayerNum))
         end
-        return tostring(NWB.lastKnownLayerNum)
+        return tostring(nwb.lastKnownLayerNum)
     end
 
     -- Method 7: Try lastKnownLayerID and match it
-    if NWB.lastKnownLayerID and tostring(NWB.lastKnownLayerID) == tostring(layerId) then
-        -- We know the player was on this layer, but we need the layer number
-        -- Fall through to check if there's a layerNum stored elsewhere
+    if nwb.lastKnownLayerID and tostring(nwb.lastKnownLayerID) == tostring(layerId) then
         if debugLayerLookup then
             print("[WBA Debug] lastKnownLayerID matches but no layer number found")
         end
@@ -229,8 +227,22 @@ local function pairsByKeys(t)
     end
 end
 
+local function GetNWB()
+    return LibStub("AceAddon-3.0"):GetAddon("NovaWorldBuffs", true)
+end
+
 local function BuildLayerSnapshot(trigger)
-    if not NWB or not NWB.data or not NWB.data.layers then
+    local nwb = GetNWB()
+    if not nwb then
+        print("|cffff8800[BoneyWorldBosses]|r NWB addon not found.")
+        return nil
+    end
+    if not nwb.data then
+        print("|cffff8800[BoneyWorldBosses]|r NWB data not initialized yet. Try again in a few seconds.")
+        return nil
+    end
+    if not nwb.data.layers then
+        print("|cffff8800[BoneyWorldBosses]|r NWB has no layer data. Visit a capital city to populate layers.")
         return nil
     end
 
@@ -238,7 +250,7 @@ local function BuildLayerSnapshot(trigger)
     local zones = {}
     local layerCount = 0
 
-    for layerKey, layerData in pairsByKeys(NWB.data.layers) do
+    for layerKey, layerData in pairsByKeys(nwb.data.layers) do
         layerCount = layerCount + 1
         if layerData.layerMap then
             for zoneInstId, uiMapId in pairs(layerData.layerMap) do
@@ -265,7 +277,6 @@ local function WriteLayerSnapshot(trigger)
 
     local snapshot = BuildLayerSnapshot(trigger)
     if not snapshot then
-        print("|cff00ff00[BoneyWorldBosses]|r NWB layer data not available.")
         return false
     end
 
@@ -555,12 +566,20 @@ local function InitializeSavedVariables()
     db = BoneyWorldBossesDB
 end
 
-local function OnAddonLoaded(addonName)
-    if addonName ~= ADDON_NAME then return end
-
+-- AceAddon callback: called at ADDON_LOADED time
+function BWB:OnInitialize()
     -- Initialize saved variables
     InitializeSavedVariables()
 
+    -- Create options panel
+    optionsPanel = CreateOptionsPanel()
+
+    -- Print load messages
+    print("|cff00ff00[BoneyWorldBosses]|r v" .. VERSION .. " loaded.")
+end
+
+-- AceAddon callback: called at PLAYER_LOGIN time (after all addons initialized)
+function BWB:OnEnable()
     -- Auto-enable combat logging if scout mode is on
     if db.config.scoutEnabled then
         LoggingCombat(true)
@@ -572,11 +591,8 @@ local function OnAddonLoaded(addonName)
         frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
     end
 
-    -- Create options panel
-    optionsPanel = CreateOptionsPanel()
-
-    -- Print load messages
-    print("|cff00ff00[BoneyWorldBosses]|r v" .. VERSION .. " loaded.")
+    -- Register for logout (SavedVariables auto-flush)
+    frame:RegisterEvent("PLAYER_LOGOUT")
 
     local scoutStatus = db.config.scoutEnabled and "|cff00ff00ON|r" or "|cffff0000OFF|r"
     local reporterStatus = db.config.reporterEnabled and "|cff00ff00ON|r" or "|cffff0000OFF|r"
@@ -589,6 +605,11 @@ local function OnAddonLoaded(addonName)
     end
 
     print("|cff00ff00[BoneyWorldBosses]|r Type /bwb for commands. ESC > Interface > AddOns for settings.")
+
+    -- Send layer snapshot on login (NWB.data is now guaranteed available)
+    C_Timer.After(5, function()
+        WriteLayerSnapshot("login")
+    end)
 end
 
 -- =============================================================================
@@ -839,39 +860,37 @@ local function SlashHandler(msg)
 
     elseif cmd == "nwb" then
         -- Debug: show NWB layer info
+        local nwb = GetNWB()
         print("|cff00ff00[BoneyWorldBosses]|r NWB Debug Info:")
-        if not NWB then
+        if not nwb then
             print("  NWB addon: |cffff0000NOT LOADED|r")
         else
             print("  NWB addon: |cff00ff00LOADED|r")
-            print("  NWB.currentLayer: " .. tostring(NWB.currentLayer or "nil"))
-            print("  NWB.lastKnownLayer: " .. tostring(NWB.lastKnownLayer or "nil"))
-            print("  NWB.lastKnownLayerNum: " .. tostring(NWB.lastKnownLayerNum or "nil"))
-            -- Check for layer frame
-            if NWB.currentLayerShared then
-                print("  NWB.currentLayerShared: " .. tostring(NWB.currentLayerShared))
+            print("  NWB.currentLayer: " .. tostring(nwb.currentLayer or "nil"))
+            print("  NWB.lastKnownLayer: " .. tostring(nwb.lastKnownLayer or "nil"))
+            print("  NWB.lastKnownLayerNum: " .. tostring(nwb.lastKnownLayerNum or "nil"))
+            if nwb.currentLayerShared then
+                print("  NWB.currentLayerShared: " .. tostring(nwb.currentLayerShared))
             end
-            if NWB.lastKnownLayerID then
-                print("  NWB.lastKnownLayerID: " .. tostring(NWB.lastKnownLayerID))
+            if nwb.lastKnownLayerID then
+                print("  NWB.lastKnownLayerID: " .. tostring(nwb.lastKnownLayerID))
             end
-            if NWB.data and NWB.data.layers then
+            if nwb.data and nwb.data.layers then
                 print("  NWB.data.layers:")
                 local layerCount = 0
-                for layerNum, layerData in pairs(NWB.data.layers) do
+                for layerNum, layerData in pairs(nwb.data.layers) do
                     layerCount = layerCount + 1
                     print("    Layer " .. tostring(layerNum) .. ":")
                     if layerData then
-                        -- Show GUID if present
                         if layerData.GUID then
                             print("      GUID: " .. tostring(layerData.GUID))
                         end
-                        -- Show layerMap (zone -> instanceId mapping)
                         if layerData.layerMap then
                             print("      layerMap:")
                             local mapCount = 0
                             for zoneId, instId in pairs(layerData.layerMap) do
                                 mapCount = mapCount + 1
-                                if mapCount <= 5 then  -- Limit output
+                                if mapCount <= 5 then
                                     print("        zone " .. tostring(zoneId) .. " -> instId " .. tostring(instId))
                                 end
                             end
@@ -879,7 +898,6 @@ local function SlashHandler(msg)
                                 print("        ... and " .. (mapCount - 5) .. " more zones")
                             end
                         end
-                        -- Show created timestamp if present
                         if layerData.created then
                             print("      created: " .. tostring(layerData.created))
                         end
@@ -891,11 +909,10 @@ local function SlashHandler(msg)
             else
                 print("  NWB.data.layers: nil")
             end
-            -- Also check NWB.data.layerMap directly if it exists
-            if NWB.data and NWB.data.layerMap then
+            if nwb.data and nwb.data.layerMap then
                 print("  NWB.data.layerMap (direct):")
                 local count = 0
-                for k, v in pairs(NWB.data.layerMap) do
+                for k, v in pairs(nwb.data.layerMap) do
                     count = count + 1
                     if count <= 3 then
                         print("    " .. tostring(k) .. " -> " .. tostring(v))
@@ -986,21 +1003,11 @@ SlashCmdList["WORLDBOSSANNOUNCER"] = SlashHandler
 -- EVENT HANDLING
 -- =============================================================================
 
-frame:RegisterEvent("ADDON_LOADED")
-frame:RegisterEvent("PLAYER_LOGIN")
-frame:RegisterEvent("PLAYER_LOGOUT")
+-- Frame events for combat log and logout (AceAddon handles ADDON_LOADED + PLAYER_LOGIN)
 frame:SetScript("OnEvent", function(self, event, ...)
-    if event == "ADDON_LOADED" then
-        OnAddonLoaded(...)
-    elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
+    if event == "COMBAT_LOG_EVENT_UNFILTERED" then
         OnCombatLogEvent()
-    elseif event == "PLAYER_LOGIN" then
-        -- Delay to let NWB populate layer data from other players
-        C_Timer.After(5, function()
-            WriteLayerSnapshot("login")
-        end)
     elseif event == "PLAYER_LOGOUT" then
-        -- SavedVariables auto-flush on logout
         WriteLayerSnapshot("logout")
     end
 end)
