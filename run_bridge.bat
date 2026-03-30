@@ -28,13 +28,13 @@ if errorlevel 1 (
     echo.
 )
 
-REM Check if config is set (look for empty LOGS_DIR)
-findstr /C:"LOGS_DIR" bridge.py | findstr /C:": \"\"," >nul 2>&1
+REM Check if GUILD_ID is set
+findstr /C:"GUILD_ID" bridge.py | findstr /C:": \"\"," >nul 2>&1
 if not errorlevel 1 (
-    echo ERROR: LOGS_DIR is not configured!
+    echo ERROR: GUILD_ID is not configured!
     echo.
-    echo Please edit bridge.py and set your WoW Logs directory:
-    echo   Windows: C:\Program Files\World of Warcraft\_anniversary_\Logs
+    echo Please edit bridge.py and set your Discord server ID.
+    echo Right-click your server in Discord ^> Copy Server ID
     echo.
     pause
     exit /b 1

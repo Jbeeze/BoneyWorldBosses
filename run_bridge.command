@@ -26,12 +26,12 @@ if ! python3 -c "import requests" &> /dev/null; then
     echo ""
 fi
 
-# Check if config is set
-if grep -q 'LOGS_DIR": ""' bridge.py; then
-    echo "ERROR: LOGS_DIR is not configured!"
+# Check if GUILD_ID is set
+if grep -q '"GUILD_ID": ""' bridge.py; then
+    echo "ERROR: GUILD_ID is not configured!"
     echo ""
-    echo "Please edit bridge.py and set your WoW Logs directory:"
-    echo "  macOS: /Applications/World of Warcraft/_anniversary_/Logs"
+    echo "Please edit bridge.py and set your Discord server ID."
+    echo "Right-click your server in Discord > Copy Server ID"
     echo ""
     read -p "Press Enter to exit..."
     exit 1
