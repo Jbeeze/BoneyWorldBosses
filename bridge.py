@@ -30,6 +30,7 @@ CONFIG = {
     "BOT_API_URL": "https://worldbosstrackerdiscordbot.onrender.com",
 
     # Discord guild/server ID (required)
+    # e.g. "GUILD_ID": "1234567890123456789",
     "GUILD_ID": "",
 
     # Path to WoW Logs directory (NOT the specific file!)
