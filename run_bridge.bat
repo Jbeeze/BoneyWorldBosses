@@ -1,11 +1,11 @@
 @echo off
-REM World Boss Announcer - Bridge Launcher (Windows)
+REM Boney World Bosses - Bridge Launcher (Windows)
 REM Double-click this file to start the bridge
 
 cd /d "%~dp0"
 
 echo ========================================
-echo   World Boss Announcer - Bridge
+echo   Boney World Bosses - Bridge
 echo ========================================
 echo.
 

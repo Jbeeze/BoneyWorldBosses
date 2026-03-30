@@ -1,12 +1,12 @@
 #!/bin/bash
-# World Boss Announcer - Bridge Launcher (macOS)
+# Boney World Bosses - Bridge Launcher (macOS)
 # Double-click this file to start the bridge
 
 # Change to the directory where this script is located
 cd "$(dirname "$0")"
 
 echo "========================================"
-echo "  World Boss Announcer - Bridge"
+echo "  Boney World Bosses - Bridge"
 echo "========================================"
 echo ""
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-World Boss Announcer - Discord Bridge v3.1
+Boney World Bosses - Discord Bridge v3.1
 Two detection modes:
   - Scout: Tails WoWCombatLog for real-time Kazzak/Doomwalker combat detection
   - Reporter: Reads SavedVariables for kill reports (requires /reload in-game)
@@ -254,7 +254,7 @@ def save_state(state: dict) -> None:
 
 def find_savedvariables_file() -> str | None:
     """
-    Auto-discover WorldBossAnnouncer.lua in WTF folder.
+    Auto-discover BoneyWorldBosses.lua in WTF folder.
     Returns the most recently modified file if multiple accounts exist.
     """
     logs_dir = CONFIG["LOGS_DIR"]
@@ -268,8 +268,8 @@ def find_savedvariables_file() -> str | None:
     if not wtf_path.exists():
         return None
 
-    # Search for WorldBossAnnouncer.lua in any account folder
-    pattern = str(wtf_path / "*" / "SavedVariables" / "WorldBossAnnouncer.lua")
+    # Search for BoneyWorldBosses.lua in any account folder
+    pattern = str(wtf_path / "*" / "SavedVariables" / "BoneyWorldBosses.lua")
     files = glob.glob(pattern)
 
     if not files:
@@ -281,7 +281,7 @@ def find_savedvariables_file() -> str | None:
 
 def parse_savedvariables(path: str, verbose: bool = False) -> dict:
     """
-    Parse the WorldBossAnnouncer.lua SavedVariables file.
+    Parse the BoneyWorldBosses.lua SavedVariables file.
     Returns a dict with pendingKills list.
     """
     result = {"pendingKills": []}
@@ -297,7 +297,7 @@ def parse_savedvariables(path: str, verbose: bool = False) -> dict:
         print(f"[KILL] SavedVariables file size: {len(content)} bytes")
 
     # Find the pendingKills section by looking for it and extracting until ["config"]
-    # or end of WorldBossAnnouncerDB
+    # or end of BoneyWorldBossesDB
     pending_start = content.find('["pendingKills"]')
     if pending_start == -1:
         if verbose:
@@ -414,10 +414,9 @@ def mark_kill_reported(kill: dict, state: dict) -> None:
         state["reported_kills"] = state["reported_kills"][-100:]
 
 
-def mark_kill_sent_in_savedvariables(kill: dict) -> bool:
+def remove_kill_from_savedvariables(kill: dict) -> bool:
     """
-    Mark a kill as sent in the SavedVariables file by adding ["sent"] = true.
-    This allows the addon to show correct status on next /reload.
+    Remove a kill entry from pendingKills in the SavedVariables file.
     Returns True on success.
     """
     sv_file = find_savedvariables_file()
@@ -428,18 +427,12 @@ def mark_kill_sent_in_savedvariables(kill: dict) -> bool:
         with open(sv_file, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
     except IOError as e:
-        print(f"[KILL] Error reading SavedVariables for update: {e}")
+        print(f"[KILL] Error reading SavedVariables for removal: {e}")
         return False
 
-    # Find this kill by matching boss and timestamp
     boss = kill.get("boss", "")
     timestamp = kill.get("timestamp", 0)
 
-    # Build a pattern to find this specific kill entry
-    # We look for a block containing both ["boss"] = "X" and ["timestamp"] = Y
-    # Then add ["sent"] = true if not already present
-
-    # Find all kill entries
     pending_start = content.find('["pendingKills"]')
     if pending_start == -1:
         return False
@@ -462,11 +455,7 @@ def mark_kill_sent_in_savedvariables(kill: dict) -> bool:
 
     pending_section = content[data_start:data_end + 1]
 
-    # Find and update the matching kill entry
-    modified = False
-    new_pending = pending_section
-
-    # Find each kill block
+    # Find and remove the matching kill entry
     i = 0
     while i < len(pending_section):
         entry_start = pending_section.find('{', i)
@@ -487,40 +476,43 @@ def mark_kill_sent_in_savedvariables(kill: dict) -> bool:
 
         kill_block = pending_section[entry_start:entry_end + 1]
 
-        # Check if this is our kill
         boss_match = f'["boss"] = "{boss}"' in kill_block
         timestamp_match = f'["timestamp"] = {timestamp}' in kill_block
 
         if boss_match and timestamp_match:
-            # Check if already has ["sent"] = true
-            if '["sent"] = true' not in kill_block:
-                # Add sent = true before the closing brace
-                # Find the last field and add after it
-                new_block = kill_block[:-1].rstrip()
-                if not new_block.endswith(','):
-                    new_block += ','
-                new_block += '\n\t\t\t["sent"] = true,\n\t\t}'
+            # Remove the entry and any surrounding whitespace/comma
+            remove_start = entry_start
+            remove_end = entry_end + 1
+            # Consume trailing comma and whitespace
+            while remove_end < len(pending_section) and pending_section[remove_end] in ' ,\t\n\r':
+                remove_end += 1
+            # Consume leading whitespace/index markers like [1] =
+            while remove_start > 0 and pending_section[remove_start - 1] in ' \t':
+                remove_start -= 1
+            # Check for Lua array index like [1] = before the block
+            prefix = pending_section[:remove_start].rstrip()
+            idx_match = re.search(r'\[\d+\]\s*=\s*$', prefix)
+            if idx_match:
+                remove_start = len(prefix) - len(idx_match.group(0))
+                # Also consume leading whitespace before index
+                while remove_start > 0 and pending_section[remove_start - 1] in ' \t\n\r':
+                    remove_start -= 1
 
-                new_pending = new_pending[:entry_start] + new_block + new_pending[entry_end + 1:]
-                modified = True
-                break
+            new_pending = pending_section[:remove_start] + pending_section[remove_end:]
+            new_content = content[:data_start] + new_pending + content[data_end + 1:]
+
+            try:
+                with open(sv_file, "w", encoding="utf-8") as f:
+                    f.write(new_content)
+                print(f"[KILL] Removed kill from SavedVariables")
+                return True
+            except IOError as e:
+                print(f"[KILL] Error writing SavedVariables: {e}")
+                return False
 
         i = entry_end + 1
 
-    if modified:
-        # Rebuild the full content
-        new_content = content[:data_start] + new_pending + content[data_end + 1:]
-
-        try:
-            with open(sv_file, "w", encoding="utf-8") as f:
-                f.write(new_content)
-            print(f"[KILL] Marked kill as sent in SavedVariables")
-            return True
-        except IOError as e:
-            print(f"[KILL] Error writing SavedVariables: {e}")
-            return False
-
-    return True  # Already marked or not found
+    return True  # Not found (already removed)
 
 
 def post_kill_report(kill: dict) -> bool:
@@ -612,8 +604,8 @@ def check_pending_kills(state: dict, verbose: bool = False) -> None:
             if post_kill_report(kill):
                 mark_kill_reported(kill, state)
                 save_state(state)
-                # Also mark as sent in SavedVariables so addon shows correct status
-                mark_kill_sent_in_savedvariables(kill)
+                # Remove from SavedVariables so it won't be re-sent
+                remove_kill_from_savedvariables(kill)
                 print(f"[KILL] Successfully reported kill")
             else:
                 print(f"[KILL] Failed to report kill, will retry later")
@@ -960,7 +952,7 @@ def process_line(line: str) -> None:
 
 def main_loop() -> None:
     """Main processing loop."""
-    print(f"[WorldBossAnnouncer] Starting bridge v3.1 (combat log + kill reports)...")
+    print(f"[BoneyWorldBosses] Starting bridge v3.1 (combat log + kill reports)...")
     print(f"  Bot API: {CONFIG['BOT_API_URL']}")
     print(f"  Logs dir: {CONFIG['LOGS_DIR']}")
     print(f"  Poll interval: {CONFIG['POLL_INTERVAL']}s")
@@ -1035,7 +1027,7 @@ def validate_config() -> bool:
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("  World Boss Announcer - Bridge v3.1")
+    print("  Boney World Bosses - Bridge v3.1")
     print("  Scout: Combat log detection (real-time)")
     print("  Reporter: Kill reports (after /reload)")
     print("  Watches for Kazzak/Doomwalker")

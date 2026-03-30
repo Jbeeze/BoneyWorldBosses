@@ -1,6 +1,6 @@
-# World Boss Announcer v3.1
+# Boney World Bosses v3.2
 
-A WoW Classic TBC Anniversary addon that detects world boss activity and reports kills to Discord via the [WorldBossTracker](https://github.com/Jbeeze/WorldBossTrackerDiscordBot) bot.
+A WoW Classic TBC Anniversary addon that detects world boss activity, reports kills, and tracks server layer information to Discord via the [WorldBossTracker](https://github.com/Jbeeze/WorldBossTrackerDiscordBot) bot.
 
 ## Features
 
@@ -15,7 +15,13 @@ A WoW Classic TBC Anniversary addon that detects world boss activity and reports
 - **Layer Information**: Captures layer from NWB addon and layerId from GUID
 - **Server Time**: Records kill time in Server Time format
 - **Confirmation Popup**: Shows kill details before reporting
-- **Persistent Queue**: Kills saved to SavedVariables survive logouts
+- **Auto-Cleanup**: Reported kills are automatically removed from the pending queue
+
+### Layer Updates
+- **NWB Layer Snapshots**: Reports active server layers with instance IDs for all tracked zones
+- **Auto on Login/Logout**: Sends layer data to Discord on login (5s delay for NWB sync) and logout
+- **Manual Command**: `/bwb layers` sends a layer update with confirmation before UI reload
+- **Per-Zone Reporting**: Sends a `LAYER_UPDATE` webhook for each zone NWB has mapped
 
 ## How It Works
 
@@ -34,6 +40,13 @@ A WoW Classic TBC Anniversary addon that detects world boss activity and reports
 │  (in-game)     (queued)           (flush)     (on disk)          (polls)   │
 │                                                        │                    │
 │                                                        └──► Bot ──► Discord │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                             LAYER UPDATES                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  NWB Data ──► layerSnapshot ──► /reload or logout ──► bridge.py ──► Bot    │
+│  (in-game)    (SavedVariables)   (flush to disk)       (polls)     Discord │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -61,15 +74,15 @@ This creates the log file that the bridge will tail. You only need to do this on
 Copy the addon files to your WoW Classic AddOns folder:
 
 ```
-WoW/_anniversary_/Interface/AddOns/WorldBossAnnouncer/
-├── WorldBossAnnouncer.toc
-└── WorldBossAnnouncer.lua
+WoW/_anniversary_/Interface/AddOns/BoneyWorldBosses/
+├── BoneyWorldBosses.toc
+└── BoneyWorldBosses.lua
 ```
 
 Or clone directly:
 ```bash
 cd "/path/to/WoW/_anniversary_/Interface/AddOns"
-git clone https://github.com/Jbeeze/WorldBossAnnouncer.git WorldBossAnnouncer
+git clone https://github.com/Jbeeze/Boney-World-Bosses.git BoneyWorldBosses
 ```
 
 ### 3. Configure the Python Bridge
@@ -79,25 +92,13 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
-Edit `bridge.py` and set your configuration:
+The bridge **auto-detects** the WoW Logs directory when run from the addon folder. No manual configuration needed.
+
+If auto-detection fails, edit `bridge.py` and set `LOGS_DIR` manually:
 ```python
 CONFIG = {
-    # Your WorldBossTracker bot URL
     "BOT_API_URL": "https://worldbosstrackerdiscordbot.onrender.com",
-
-    # Path to WoW Logs directory (NOT the specific file!)
-    # macOS: /Applications/World of Warcraft/_anniversary_/Logs
-    # Windows: C:\Program Files\World of Warcraft\_anniversary_\Logs
     "LOGS_DIR": "/path/to/WoW/_anniversary_/Logs",
-
-    # How often to check for new lines (seconds)
-    "POLL_INTERVAL": 1,
-
-    # Deduplication window (seconds) - prevents spam during combat
-    "DEDUP_WINDOW": 30,
-
-    # How often to check for kill reports (seconds)
-    "KILL_REPORT_CHECK_INTERVAL": 5,
 }
 ```
 
@@ -118,7 +119,7 @@ The bridge must run on the same machine as WoW since it reads local files.
 
 ### Interface Options Panel
 
-Access settings via: **ESC → Interface → AddOns → WorldBossAnnouncer**
+Access settings via: **ESC → Interface → AddOns → BoneyWorldBosses**
 
 - **Enable Scout Mode**: Controls combat logging for real-time boss detection
 - **Enable Kill Reporter**: Detects boss kills and queues them for Discord
@@ -129,24 +130,43 @@ Access settings via: **ESC → Interface → AddOns → WorldBossAnnouncer**
 
 | Command | Description |
 |---------|-------------|
-| `/wba` | Show help |
-| `/wba scout on\|off` | Toggle Scout mode |
-| `/wba reporter on\|off` | Toggle Reporter mode |
-| `/wba status` | Show current status |
-| `/wba pending` | List pending kill reports |
-| `/wba clear` | Clear pending kill reports |
-| `/wba options` | Open settings panel |
-| `/wba test kill` | Test mode (next creature kill = test report) |
-| `/wba logging on\|off` | Legacy command (same as scout) |
+| `/bwb` | Show help |
+| `/bwb scout on\|off` | Toggle Scout mode |
+| `/bwb reporter on\|off` | Toggle Reporter mode |
+| `/bwb status` | Show current status |
+| `/bwb layers` | Send layer update to Discord (reloads UI) |
+| `/bwb log status` | Show all kill reports with status |
+| `/bwb log clear` | Clear pending kill reports |
+| `/bwb log update # <field> <value>` | Update a kill report field |
+| `/bwb options` | Open settings panel |
+| `/bwb test kill` | Test mode (next creature kill = test report) |
+| `/bwb nwb` | Debug NWB layer info |
+| `/bwb debug layer` | Toggle verbose layer lookup debugging |
 
 Both Scout and Reporter modes are **enabled by default**.
 
 ## Alert Types
 
-| Source | Alert Type | Example Message |
-|--------|------------|-----------------|
-| Scout (combat detected) | `COMBAT_DETECTED` | `@tbc WORLD BOSS: Doom Lord Kazzak detected in combat!` |
-| Reporter (boss killed) | `BOSS_KILLED` | `Doom Lord Kazzak killed at 11:35am ST on Layer 2` |
+| Source | Alert Type | Description |
+|--------|------------|-------------|
+| Scout | `COMBAT_DETECTED` | Real-time boss combat detection |
+| Reporter | `BOSS_KILLED` | Kill report with time, layer, and instance ID |
+| Layer Update | `LAYER_UPDATE` | Active server layers per zone with instance IDs |
+
+### LAYER_UPDATE Payload
+
+```json
+{
+  "alertType": "LAYER_UPDATE",
+  "trigger": "login",
+  "zone": "1944",
+  "layers": { "1": "106045", "2": "112071", "3": "118230" }
+}
+```
+
+- `zone`: UIMapID as string (e.g., `"1944"` = Hellfire Peninsula)
+- `layers`: layer number → zone instance ID
+- `trigger`: `"login"`, `"logout"`, or `"manual"`
 
 ## Kill Reporting Flow
 
@@ -156,42 +176,16 @@ Both Scout and Reporter modes are **enabled by default**.
 4. **Report Kill**: Click to trigger /reload, flushing SavedVariables to disk
 5. **Bridge Reads**: bridge.py polls SavedVariables every 5 seconds
 6. **Alert Sent**: BOSS_KILLED alert posted to Discord bot
+7. **Cleanup**: Kill entry removed from SavedVariables after successful report
 
 **Note**: The /reload is required because WoW only writes SavedVariables to disk on logout/reload.
 
-## Combat Log Format
-
-The bridge parses WoW's combat log format:
-
-```
-M/D HH:MM:SS.mmm  SUBEVENT,sourceGUID,sourceName,...
-```
-
-GUID format for creatures:
-```
-Creature-0-server-zone-instance-NPCID-spawn
-```
-
-Example GUID: `Creature-0-6257-530-104772-18463-0000495DFA`
-- Position 0: `Creature` (type)
-- Position 1: `0` (marker)
-- Position 2: `6257` (server ID)
-- Position 3: `530` (zone ID - Outland)
-- Position 4: `104772` (instance/layer ID)
-- Position 5: `18463` (NPC ID)
-- Position 6: `0000495DFA` (spawn ID)
-
-Example UNIT_DIED line:
-```
-3/29 13:37:49.892  UNIT_DIED,0000000000000000,nil,0x80000000,0x80000000,Creature-0-6257-530-104772-18463-0000495DFA,"Dampscale Devourer",0x10a48,0x80000000,0
-```
-
 ## Requirements
 
+- [NovaWorldBuffs](https://www.curseforge.com/wow/addons/nova-world-buffs) addon (optional, recommended for layer info)
+- Python 3 with `requests` module for the bridge
 - Must be within ~50 yards of boss combat to receive combat log events
-- Someone must be actively fighting the boss for events to appear
 - Combat logging must be enabled (addon does this automatically when Scout mode is on)
-- NWB addon recommended for accurate layer info (optional)
 
 ## Testing
 
@@ -212,50 +206,58 @@ Example UNIT_DIED line:
 ### Test Kill Mode
 Test the kill reporting flow without waiting for a world boss:
 
-1. Type `/wba test kill` to arm test mode
+1. Type `/bwb test kill` to arm test mode
 2. Kill any creature (boar, critter, etc.)
 3. Popup appears with test kill details
 4. Click "Report Kill" (triggers /reload)
 5. Bridge sends test alert (marked as `isTest: true`)
 6. Test mode auto-disables after one kill
 
+### Layer Updates
+1. Login to WoW with NWB installed
+2. Layer snapshot auto-sends 5 seconds after login
+3. Or type `/bwb layers` for a manual update
+4. Check bridge console for `[LAYER]` messages
+
 ### Edge Cases
 - Log out without clicking popup → kill saved, report on next login after /reload
 - Multiple kills before reload → all queued and reported
 - NWB not installed → layer shows "?" but layerId still captured from GUID
+- Bridge restart → reported kills tracked in `bridge_state.json`, no duplicates
 
 ## Bot Setup
 
 This addon requires the [WorldBossTracker Discord bot](https://github.com/Jbeeze/WorldBossTrackerDiscordBot) to be running.
 
-The bot needs to handle two alert types:
+The bot needs to handle three alert types:
 - `COMBAT_DETECTED` - Real-time boss activity alerts
 - `BOSS_KILLED` - Kill reports with time/layer info
+- `LAYER_UPDATE` - Server layer status per zone
 
 ## Troubleshooting
 
 ### Alerts not appearing in Discord
 
 1. Check that `bridge.py` is running
-2. Verify `LOGS_DIR` points to the correct Logs directory
-3. Ensure combat logging is enabled (`/wba status`)
+2. Verify `LOGS_DIR` is auto-detected or set correctly
+3. Ensure combat logging is enabled (`/bwb status`)
 4. Ensure the bot is running and connected to Discord
 5. Check the bridge console for errors
 6. Verify you're within 50 yards of the combat
 
 ### Kill reports not sending
 
-1. Ensure Reporter mode is enabled (`/wba status`)
-2. Check `/wba pending` to see if kills are queued
+1. Ensure Reporter mode is enabled (`/bwb status`)
+2. Check `/bwb log status` to see if kills are queued
 3. Type `/reload` to flush SavedVariables
-4. Check bridge console for "[KILL]" messages
+4. Check bridge console for `[KILL]` messages
 5. Verify SavedVariables file exists in WTF folder
 
 ### Log file not found
 
 1. Run `/combatlog` in WoW to create a combat log file
 2. Verify `WoWCombatLog-*.txt` files exist in `_anniversary_/Logs/`
-3. Make sure `LOGS_DIR` in `bridge.py` points to the Logs directory
+3. If auto-detection fails, set `LOGS_DIR` manually in `bridge.py`
 
 ### Bridge restarts reading old messages
 
@@ -264,14 +266,14 @@ The bridge saves its position in `bridge_state.json`. On restart, it resumes fro
 ## File Structure
 
 ```
-WorldBossAnnouncer/
-├── WorldBossAnnouncer.toc    # Addon metadata (Interface 20504)
-├── WorldBossAnnouncer.lua    # Main addon code
-├── bridge.py                 # Python bridge script
-├── run_bridge.command        # macOS launcher (double-click)
-├── run_bridge.bat            # Windows launcher (double-click)
-├── requirements.txt          # Python dependencies
-├── bridge_state.json         # Bridge position + reported kills (auto-created)
+BoneyWorldBosses/
+├── BoneyWorldBosses.toc       # Addon metadata (Interface 20504)
+├── BoneyWorldBosses.lua       # Main addon code
+├── bridge.py                  # Python bridge script
+├── run_bridge.command         # macOS launcher (double-click)
+├── run_bridge.bat             # Windows launcher (double-click)
+├── requirements.txt           # Python dependencies
+├── bridge_state.json          # Bridge state (auto-created at runtime)
 └── README.md
 ```
 
@@ -279,12 +281,12 @@ WorldBossAnnouncer/
 
 The addon stores data in:
 ```
-WoW/_anniversary_/WTF/Account/<ACCOUNT>/SavedVariables/WorldBossAnnouncer.lua
+WoW/_anniversary_/WTF/Account/<ACCOUNT>/SavedVariables/BoneyWorldBosses.lua
 ```
 
 Structure:
 ```lua
-WorldBossAnnouncerDB = {
+BoneyWorldBossesDB = {
     ["config"] = {
         ["scoutEnabled"] = true,
         ["reporterEnabled"] = true,
@@ -298,6 +300,16 @@ WorldBossAnnouncerDB = {
             ["timestamp"] = 1711043445,
         },
     },
+    ["layerSnapshot"] = {
+        ["timestamp"] = 1711043445,
+        ["trigger"] = "login",
+        ["zones"] = {
+            ["1944"] = {
+                ["1"] = "106045",
+                ["2"] = "112071",
+            },
+        },
+    },
 }
 ```
 
@@ -305,6 +317,7 @@ WorldBossAnnouncerDB = {
 
 | Version | Changes |
 |---------|---------|
+| v3.2 | Layer updates (NWB integration), auto-detect Logs dir, rename to Boney World Bosses |
 | v3.1 | Added Reporter mode (kill detection + reporting) |
 | v3.0 | Combat log tailing, NPC ID matching, real-time alerts |
 | v2.0 | Chat log tailing, pattern matching |

@@ -1,10 +1,10 @@
--- WorldBossAnnouncer: World Boss Announcer for Discord (v3.1)
+-- BoneyWorldBosses: Boney World Bosses for Discord (v3.1)
 -- Target: TBC Anniversary (Interface 20504)
 -- Features:
 --   Scout Mode: Combat logging for real-time boss detection
 --   Reporter Mode: Kill detection and reporting to Discord
 
-local ADDON_NAME = "WorldBossAnnouncer"
+local ADDON_NAME = "BoneyWorldBosses"
 local VERSION = "3.1.0"
 
 -- =============================================================================
@@ -265,7 +265,7 @@ local function WriteLayerSnapshot(trigger)
 
     local snapshot = BuildLayerSnapshot(trigger)
     if not snapshot then
-        print("|cff00ff00[WorldBossAnnouncer]|r NWB layer data not available.")
+        print("|cff00ff00[BoneyWorldBosses]|r NWB layer data not available.")
         return false
     end
 
@@ -280,7 +280,7 @@ local function WriteLayerSnapshot(trigger)
             totalMappings = totalMappings + 1
         end
     end
-    print("|cff00ff00[WorldBossAnnouncer]|r Layer snapshot saved (" .. trigger .. "): " .. zoneCount .. " zone(s), " .. totalMappings .. " mapping(s)")
+    print("|cff00ff00[BoneyWorldBosses]|r Layer snapshot saved (" .. trigger .. "): " .. zoneCount .. " zone(s), " .. totalMappings .. " mapping(s)")
     return true
 end
 
@@ -320,7 +320,7 @@ local function OnUnitDied(destGuid, destName)
 
         -- Only accept creatures (not players)
         if not destGuid or not string.find(destGuid, "Creature-") then
-            print("|cff00ff00[WorldBossAnnouncer]|r Test mode: waiting for creature death (not player)")
+            print("|cff00ff00[BoneyWorldBosses]|r Test mode: waiting for creature death (not player)")
             testKillModeActive = true  -- Re-enable, this wasn't a valid target
             return
         end
@@ -366,12 +366,12 @@ local function OnUnitDied(destGuid, destName)
     -- Add to pending kills
     table.insert(db.pendingKills, killRecord)
 
-    print("|cff00ff00[WorldBossAnnouncer]|r Kill detected: " .. bossDisplayName)
+    print("|cff00ff00[BoneyWorldBosses]|r Kill detected: " .. bossDisplayName)
     if isTestKill then
-        print("|cff00ff00[WorldBossAnnouncer]|r NPC ID: " .. (npcId or "?") .. " | Time: " .. killTime .. " ST | Layer: " .. layer .. " | LayerId: " .. layerId)
-        print("|cffff8800[WorldBossAnnouncer]|r TEST MODE completed - this is a test report")
+        print("|cff00ff00[BoneyWorldBosses]|r NPC ID: " .. (npcId or "?") .. " | Time: " .. killTime .. " ST | Layer: " .. layer .. " | LayerId: " .. layerId)
+        print("|cffff8800[BoneyWorldBosses]|r TEST MODE completed - this is a test report")
     else
-        print("|cff00ff00[WorldBossAnnouncer]|r Time: " .. killTime .. " ST | Layer: " .. layer .. " | LayerId: " .. layerId)
+        print("|cff00ff00[BoneyWorldBosses]|r Time: " .. killTime .. " ST | Layer: " .. layer .. " | LayerId: " .. layerId)
     end
 
     -- Show confirmation popup (StaticPopup_Show only accepts 2 text args)
@@ -399,11 +399,11 @@ StaticPopupDialogs["WBA_CONFIRM_KILL_REPORT"] = {
     button1 = "Report Kill",
     button2 = "Cancel",
     OnAccept = function()
-        print("|cff00ff00[WorldBossAnnouncer]|r Reloading UI to flush kill report...")
+        print("|cff00ff00[BoneyWorldBosses]|r Reloading UI to flush kill report...")
         ReloadUI()
     end,
     OnCancel = function()
-        print("|cff00ff00[WorldBossAnnouncer]|r Kill report saved. Type /reload when ready to report.")
+        print("|cff00ff00[BoneyWorldBosses]|r Kill report saved. Type /reload when ready to report.")
     end,
     timeout = 0,
     whileDead = true,
@@ -417,12 +417,12 @@ StaticPopupDialogs["WBA_CONFIRM_LAYER_SNAPSHOT"] = {
     button2 = "Cancel",
     OnAccept = function()
         if WriteLayerSnapshot("manual") then
-            print("|cff00ff00[WorldBossAnnouncer]|r Reloading UI to flush layer snapshot...")
+            print("|cff00ff00[BoneyWorldBosses]|r Reloading UI to flush layer snapshot...")
             ReloadUI()
         end
     end,
     OnCancel = function()
-        print("|cff00ff00[WorldBossAnnouncer]|r Layer snapshot cancelled.")
+        print("|cff00ff00[BoneyWorldBosses]|r Layer snapshot cancelled.")
     end,
     timeout = 0,
     whileDead = true,
@@ -437,12 +437,12 @@ StaticPopupDialogs["WBA_CONFIRM_LAYER_SNAPSHOT"] = {
 local function CreateOptionsPanel()
     -- Create the options panel
     local panel = CreateFrame("Frame")
-    panel.name = "WorldBossAnnouncer"
+    panel.name = "BoneyWorldBosses"
 
     -- Title
     local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("World Boss Announcer v" .. VERSION)
+    title:SetText("Boney World Bosses v" .. VERSION)
 
     -- Description
     local desc = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -459,11 +459,11 @@ local function CreateOptionsPanel()
         if checked then
             LoggingCombat(true)
             isLoggingEnabled = true
-            print("|cff00ff00[WorldBossAnnouncer]|r Scout mode |cff00ff00ENABLED|r - Combat logging ON")
+            print("|cff00ff00[BoneyWorldBosses]|r Scout mode |cff00ff00ENABLED|r - Combat logging ON")
         else
             LoggingCombat(false)
             isLoggingEnabled = false
-            print("|cff00ff00[WorldBossAnnouncer]|r Scout mode |cffff0000DISABLED|r - Combat logging OFF")
+            print("|cff00ff00[BoneyWorldBosses]|r Scout mode |cffff0000DISABLED|r - Combat logging OFF")
         end
     end)
 
@@ -480,9 +480,9 @@ local function CreateOptionsPanel()
         local checked = self:GetChecked()
         db.config.reporterEnabled = checked
         if checked then
-            print("|cff00ff00[WorldBossAnnouncer]|r Reporter mode |cff00ff00ENABLED|r")
+            print("|cff00ff00[BoneyWorldBosses]|r Reporter mode |cff00ff00ENABLED|r")
         else
-            print("|cff00ff00[WorldBossAnnouncer]|r Reporter mode |cffff0000DISABLED|r")
+            print("|cff00ff00[BoneyWorldBosses]|r Reporter mode |cffff0000DISABLED|r")
         end
     end)
 
@@ -507,7 +507,7 @@ local function CreateOptionsPanel()
     clearButton:SetScript("OnClick", function()
         db.pendingKills = {}
         pendingCount:SetText("0 pending kills")
-        print("|cff00ff00[WorldBossAnnouncer]|r Pending kill reports cleared.")
+        print("|cff00ff00[BoneyWorldBosses]|r Pending kill reports cleared.")
     end)
 
     -- Refresh function
@@ -532,27 +532,27 @@ local optionsPanel = nil
 
 local function InitializeSavedVariables()
     -- Initialize saved variables with defaults if needed
-    if not WorldBossAnnouncerDB then
-        WorldBossAnnouncerDB = {}
+    if not BoneyWorldBossesDB then
+        BoneyWorldBossesDB = {}
     end
 
-    if not WorldBossAnnouncerDB.config then
-        WorldBossAnnouncerDB.config = {}
+    if not BoneyWorldBossesDB.config then
+        BoneyWorldBossesDB.config = {}
     end
 
     -- Apply defaults
     for key, value in pairs(DB_DEFAULTS.config) do
-        if WorldBossAnnouncerDB.config[key] == nil then
-            WorldBossAnnouncerDB.config[key] = value
+        if BoneyWorldBossesDB.config[key] == nil then
+            BoneyWorldBossesDB.config[key] = value
         end
     end
 
-    if not WorldBossAnnouncerDB.pendingKills then
-        WorldBossAnnouncerDB.pendingKills = {}
+    if not BoneyWorldBossesDB.pendingKills then
+        BoneyWorldBossesDB.pendingKills = {}
     end
 
     -- Set local reference
-    db = WorldBossAnnouncerDB
+    db = BoneyWorldBossesDB
 end
 
 local function OnAddonLoaded(addonName)
@@ -576,19 +576,19 @@ local function OnAddonLoaded(addonName)
     optionsPanel = CreateOptionsPanel()
 
     -- Print load messages
-    print("|cff00ff00[WorldBossAnnouncer]|r v" .. VERSION .. " loaded.")
+    print("|cff00ff00[BoneyWorldBosses]|r v" .. VERSION .. " loaded.")
 
     local scoutStatus = db.config.scoutEnabled and "|cff00ff00ON|r" or "|cffff0000OFF|r"
     local reporterStatus = db.config.reporterEnabled and "|cff00ff00ON|r" or "|cffff0000OFF|r"
-    print("|cff00ff00[WorldBossAnnouncer]|r Scout: " .. scoutStatus .. " | Reporter: " .. reporterStatus)
+    print("|cff00ff00[BoneyWorldBosses]|r Scout: " .. scoutStatus .. " | Reporter: " .. reporterStatus)
 
     -- Show pending kills count
     local pendingCount = #db.pendingKills
     if pendingCount > 0 then
-        print("|cff00ff00[WorldBossAnnouncer]|r " .. pendingCount .. " pending kill report(s). Type /reload to send.")
+        print("|cff00ff00[BoneyWorldBosses]|r " .. pendingCount .. " pending kill report(s). Type /reload to send.")
     end
 
-    print("|cff00ff00[WorldBossAnnouncer]|r Type /bwb for commands. ESC > Interface > AddOns for settings.")
+    print("|cff00ff00[BoneyWorldBosses]|r Type /bwb for commands. ESC > Interface > AddOns for settings.")
 end
 
 -- =============================================================================
@@ -609,14 +609,14 @@ local function SlashHandler(msg)
             db.config.scoutEnabled = true
             LoggingCombat(true)
             isLoggingEnabled = true
-            print("|cff00ff00[WorldBossAnnouncer]|r Scout mode |cff00ff00ENABLED|r - Combat logging ON")
+            print("|cff00ff00[BoneyWorldBosses]|r Scout mode |cff00ff00ENABLED|r - Combat logging ON")
         elseif setting == "off" then
             db.config.scoutEnabled = false
             LoggingCombat(false)
             isLoggingEnabled = false
-            print("|cff00ff00[WorldBossAnnouncer]|r Scout mode |cffff0000DISABLED|r - Combat logging OFF")
+            print("|cff00ff00[BoneyWorldBosses]|r Scout mode |cffff0000DISABLED|r - Combat logging OFF")
         else
-            print("|cff00ff00[WorldBossAnnouncer]|r Usage: /bwb scout on/off")
+            print("|cff00ff00[BoneyWorldBosses]|r Usage: /bwb scout on/off")
         end
 
     elseif cmd == "reporter" then
@@ -624,13 +624,13 @@ local function SlashHandler(msg)
         if setting == "on" then
             db.config.reporterEnabled = true
             frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-            print("|cff00ff00[WorldBossAnnouncer]|r Reporter mode |cff00ff00ENABLED|r")
+            print("|cff00ff00[BoneyWorldBosses]|r Reporter mode |cff00ff00ENABLED|r")
         elseif setting == "off" then
             db.config.reporterEnabled = false
             frame:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-            print("|cff00ff00[WorldBossAnnouncer]|r Reporter mode |cffff0000DISABLED|r")
+            print("|cff00ff00[BoneyWorldBosses]|r Reporter mode |cffff0000DISABLED|r")
         else
-            print("|cff00ff00[WorldBossAnnouncer]|r Usage: /bwb reporter on/off")
+            print("|cff00ff00[BoneyWorldBosses]|r Usage: /bwb reporter on/off")
         end
 
     -- Legacy support for old "logging" command
@@ -640,18 +640,18 @@ local function SlashHandler(msg)
             db.config.scoutEnabled = true
             LoggingCombat(true)
             isLoggingEnabled = true
-            print("|cff00ff00[WorldBossAnnouncer]|r Combat logging |cff00ff00ENABLED|r")
+            print("|cff00ff00[BoneyWorldBosses]|r Combat logging |cff00ff00ENABLED|r")
         elseif setting == "off" then
             db.config.scoutEnabled = false
             LoggingCombat(false)
             isLoggingEnabled = false
-            print("|cff00ff00[WorldBossAnnouncer]|r Combat logging |cffff0000DISABLED|r")
+            print("|cff00ff00[BoneyWorldBosses]|r Combat logging |cffff0000DISABLED|r")
         else
-            print("|cff00ff00[WorldBossAnnouncer]|r Usage: /bwb logging on/off")
+            print("|cff00ff00[BoneyWorldBosses]|r Usage: /bwb logging on/off")
         end
 
     elseif cmd == "status" then
-        print("|cff00ff00[WorldBossAnnouncer]|r Status:")
+        print("|cff00ff00[BoneyWorldBosses]|r Status:")
         local scoutStatus = db.config.scoutEnabled and "|cff00ff00ON|r" or "|cffff0000OFF|r"
         local reporterStatus = db.config.reporterEnabled and "|cff00ff00ON|r" or "|cffff0000OFF|r"
         local loggingStatus = isLoggingEnabled and "|cff00ff00ACTIVE|r" or "|cffff0000INACTIVE|r"
@@ -665,12 +665,12 @@ local function SlashHandler(msg)
 
     elseif cmd == "pending" then
         -- Legacy alias for /bwb log status
-        print("|cff00ff00[WorldBossAnnouncer]|r Use /bwb log status instead.")
+        print("|cff00ff00[BoneyWorldBosses]|r Use /bwb log status instead.")
         -- Fall through to show status anyway
         if #db.pendingKills == 0 then
-            print("|cff00ff00[WorldBossAnnouncer]|r No kill reports.")
+            print("|cff00ff00[BoneyWorldBosses]|r No kill reports.")
         else
-            print("|cff00ff00[WorldBossAnnouncer]|r Kill reports:")
+            print("|cff00ff00[BoneyWorldBosses]|r Kill reports:")
             for i, kill in ipairs(db.pendingKills) do
                 local displayName = BOSS_DISPLAY_NAMES[kill.boss] or kill.boss
                 local status = kill.sent and "|cff00ff00sent|r" or "|cffffcc00pending|r"
@@ -682,15 +682,15 @@ local function SlashHandler(msg)
     elseif cmd == "clear" then
         -- Legacy alias for /bwb log clear
         db.pendingKills = {}
-        print("|cff00ff00[WorldBossAnnouncer]|r Pending kill reports cleared.")
+        print("|cff00ff00[BoneyWorldBosses]|r Pending kill reports cleared.")
 
     elseif cmd == "log" then
         local subcmd = args[2]
         if subcmd == "status" then
             if #db.pendingKills == 0 then
-                print("|cff00ff00[WorldBossAnnouncer]|r No kill reports.")
+                print("|cff00ff00[BoneyWorldBosses]|r No kill reports.")
             else
-                print("|cff00ff00[WorldBossAnnouncer]|r Kill reports:")
+                print("|cff00ff00[BoneyWorldBosses]|r Kill reports:")
                 local pendingCount = 0
                 local sentCount = 0
                 for i, kill in ipairs(db.pendingKills) do
@@ -706,9 +706,9 @@ local function SlashHandler(msg)
                     print(string.format("  %d. [%s] %s - %s ST - Layer %s (%s)",
                         i, status, displayName, kill.time, kill.layer, kill.layerId))
                 end
-                print("|cff00ff00[WorldBossAnnouncer]|r Total: " .. pendingCount .. " pending, " .. sentCount .. " sent")
+                print("|cff00ff00[BoneyWorldBosses]|r Total: " .. pendingCount .. " pending, " .. sentCount .. " sent")
                 if pendingCount > 0 then
-                    print("|cff00ff00[WorldBossAnnouncer]|r Type /reload to send pending reports.")
+                    print("|cff00ff00[BoneyWorldBosses]|r Type /reload to send pending reports.")
                 end
             end
 
@@ -718,7 +718,7 @@ local function SlashHandler(msg)
                 -- Clear all
                 local count = #db.pendingKills
                 db.pendingKills = {}
-                print("|cff00ff00[WorldBossAnnouncer]|r Cleared all " .. count .. " kill report(s).")
+                print("|cff00ff00[BoneyWorldBosses]|r Cleared all " .. count .. " kill report(s).")
             else
                 -- Parse range like "1-3" or single number like "2"
                 local startIdx, endIdx = string.match(range, "(%d+)-(%d+)")
@@ -732,14 +732,14 @@ local function SlashHandler(msg)
                 end
 
                 if not startIdx or not endIdx then
-                    print("|cff00ff00[WorldBossAnnouncer]|r Invalid range. Use: /bwb log clear [N] or /bwb log clear [N-M]")
+                    print("|cff00ff00[BoneyWorldBosses]|r Invalid range. Use: /bwb log clear [N] or /bwb log clear [N-M]")
                     return
                 end
 
                 -- Validate range
                 local total = #db.pendingKills
                 if startIdx < 1 or endIdx > total or startIdx > endIdx then
-                    print("|cff00ff00[WorldBossAnnouncer]|r Invalid range. You have " .. total .. " kill report(s).")
+                    print("|cff00ff00[BoneyWorldBosses]|r Invalid range. You have " .. total .. " kill report(s).")
                     return
                 end
 
@@ -749,7 +749,7 @@ local function SlashHandler(msg)
                     table.remove(db.pendingKills, i)
                     removed = removed + 1
                 end
-                print("|cff00ff00[WorldBossAnnouncer]|r Cleared " .. removed .. " kill report(s). " .. #db.pendingKills .. " remaining.")
+                print("|cff00ff00[BoneyWorldBosses]|r Cleared " .. removed .. " kill report(s). " .. #db.pendingKills .. " remaining.")
             end
 
         elseif subcmd == "update" then
@@ -758,7 +758,7 @@ local function SlashHandler(msg)
             local value = args[5]
 
             if not idx then
-                print("|cff00ff00[WorldBossAnnouncer]|r Usage: /bwb log update <#> <field> <value>")
+                print("|cff00ff00[BoneyWorldBosses]|r Usage: /bwb log update <#> <field> <value>")
                 print("  Fields: layer, layerid, time, boss, status")
                 print("  Example: /bwb log update 1 layer 3")
                 print("  Example: /bwb log update 2 time 11:35am")
@@ -767,7 +767,7 @@ local function SlashHandler(msg)
             end
 
             if idx < 1 or idx > #db.pendingKills then
-                print("|cff00ff00[WorldBossAnnouncer]|r Invalid index. You have " .. #db.pendingKills .. " kill report(s).")
+                print("|cff00ff00[BoneyWorldBosses]|r Invalid index. You have " .. #db.pendingKills .. " kill report(s).")
                 return
             end
 
@@ -776,7 +776,7 @@ local function SlashHandler(msg)
 
             if not field or not value then
                 -- Show usage
-                print("|cff00ff00[WorldBossAnnouncer]|r Usage: /bwb log update " .. idx .. " <field> <value>")
+                print("|cff00ff00[BoneyWorldBosses]|r Usage: /bwb log update " .. idx .. " <field> <value>")
                 print("  Fields: layer, layerid, time, boss, status")
                 return
             end
@@ -785,15 +785,15 @@ local function SlashHandler(msg)
             if field == "layer" then
                 local oldValue = kill.layer
                 kill.layer = value
-                print("|cff00ff00[WorldBossAnnouncer]|r Updated kill #" .. idx .. " layer: " .. tostring(oldValue) .. " -> " .. value)
+                print("|cff00ff00[BoneyWorldBosses]|r Updated kill #" .. idx .. " layer: " .. tostring(oldValue) .. " -> " .. value)
             elseif field == "layerid" then
                 local oldValue = kill.layerId
                 kill.layerId = value
-                print("|cff00ff00[WorldBossAnnouncer]|r Updated kill #" .. idx .. " layerId: " .. tostring(oldValue) .. " -> " .. value)
+                print("|cff00ff00[BoneyWorldBosses]|r Updated kill #" .. idx .. " layerId: " .. tostring(oldValue) .. " -> " .. value)
             elseif field == "time" then
                 local oldValue = kill.time
                 kill.time = value
-                print("|cff00ff00[WorldBossAnnouncer]|r Updated kill #" .. idx .. " time: " .. tostring(oldValue) .. " -> " .. value)
+                print("|cff00ff00[BoneyWorldBosses]|r Updated kill #" .. idx .. " time: " .. tostring(oldValue) .. " -> " .. value)
             elseif field == "boss" then
                 local oldValue = kill.boss
                 -- Accept common variations
@@ -804,26 +804,26 @@ local function SlashHandler(msg)
                     bossKey = "doomwalker"
                 end
                 kill.boss = bossKey
-                print("|cff00ff00[WorldBossAnnouncer]|r Updated kill #" .. idx .. " boss: " .. tostring(oldValue) .. " -> " .. bossKey)
+                print("|cff00ff00[BoneyWorldBosses]|r Updated kill #" .. idx .. " boss: " .. tostring(oldValue) .. " -> " .. bossKey)
             elseif field == "status" then
                 local oldStatus = kill.sent and "sent" or "pending"
                 local newValue = string.lower(value)
                 if newValue == "sent" or newValue == "s" then
                     kill.sent = true
-                    print("|cff00ff00[WorldBossAnnouncer]|r Updated kill #" .. idx .. " status: " .. oldStatus .. " -> sent")
+                    print("|cff00ff00[BoneyWorldBosses]|r Updated kill #" .. idx .. " status: " .. oldStatus .. " -> sent")
                 elseif newValue == "pending" or newValue == "p" then
                     kill.sent = nil
-                    print("|cff00ff00[WorldBossAnnouncer]|r Updated kill #" .. idx .. " status: " .. oldStatus .. " -> pending")
+                    print("|cff00ff00[BoneyWorldBosses]|r Updated kill #" .. idx .. " status: " .. oldStatus .. " -> pending")
                 else
-                    print("|cff00ff00[WorldBossAnnouncer]|r Invalid status. Use: sent, pending")
+                    print("|cff00ff00[BoneyWorldBosses]|r Invalid status. Use: sent, pending")
                 end
             else
-                print("|cff00ff00[WorldBossAnnouncer]|r Unknown field: " .. field)
+                print("|cff00ff00[BoneyWorldBosses]|r Unknown field: " .. field)
                 print("  Valid fields: layer, layerid, time, boss, status")
             end
 
         else
-            print("|cff00ff00[WorldBossAnnouncer]|r Log commands:")
+            print("|cff00ff00[BoneyWorldBosses]|r Log commands:")
             print("  /bwb log status      - Show all kill reports with status")
             print("  /bwb log clear       - Clear all kill reports")
             print("  /bwb log clear N     - Clear kill report #N")
@@ -834,12 +834,12 @@ local function SlashHandler(msg)
         end
 
     elseif cmd == "options" or cmd == "config" or cmd == "settings" then
-        InterfaceOptionsFrame_OpenToCategory("WorldBossAnnouncer")
-        InterfaceOptionsFrame_OpenToCategory("WorldBossAnnouncer")  -- Called twice due to WoW bug
+        InterfaceOptionsFrame_OpenToCategory("BoneyWorldBosses")
+        InterfaceOptionsFrame_OpenToCategory("BoneyWorldBosses")  -- Called twice due to WoW bug
 
     elseif cmd == "nwb" then
         -- Debug: show NWB layer info
-        print("|cff00ff00[WorldBossAnnouncer]|r NWB Debug Info:")
+        print("|cff00ff00[BoneyWorldBosses]|r NWB Debug Info:")
         if not NWB then
             print("  NWB addon: |cffff0000NOT LOADED|r")
         else
@@ -911,22 +911,22 @@ local function SlashHandler(msg)
         local subcmd = args[2]
         if subcmd == "layer" then
             debugLayerLookup = not debugLayerLookup
-            print("|cff00ff00[WorldBossAnnouncer]|r Layer lookup debug: " .. (debugLayerLookup and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
+            print("|cff00ff00[BoneyWorldBosses]|r Layer lookup debug: " .. (debugLayerLookup and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
         elseif subcmd == "lookup" then
             -- Test layer lookup with a specific instanceId
             local testId = args[3]
             if testId then
                 debugLayerLookup = true  -- Temporarily enable debug
-                print("|cff00ff00[WorldBossAnnouncer]|r Testing layer lookup for instanceId: " .. testId)
+                print("|cff00ff00[BoneyWorldBosses]|r Testing layer lookup for instanceId: " .. testId)
                 local result = GetCurrentLayer(testId)
-                print("|cff00ff00[WorldBossAnnouncer]|r Result: Layer " .. result)
+                print("|cff00ff00[BoneyWorldBosses]|r Result: Layer " .. result)
                 debugLayerLookup = false  -- Disable debug
             else
-                print("|cff00ff00[WorldBossAnnouncer]|r Usage: /bwb debug lookup <instanceId>")
+                print("|cff00ff00[BoneyWorldBosses]|r Usage: /bwb debug lookup <instanceId>")
                 print("  Example: /bwb debug lookup 79466")
             end
         else
-            print("|cff00ff00[WorldBossAnnouncer]|r Debug commands:")
+            print("|cff00ff00[BoneyWorldBosses]|r Debug commands:")
             print("  /bwb debug layer - Toggle verbose layer lookup debugging")
             print("  /bwb debug lookup <id> - Test layer lookup for specific instanceId")
         end
@@ -938,7 +938,7 @@ local function SlashHandler(msg)
         local subcmd = args[2]
         if subcmd == "kill" then
             if testKillModeActive then
-                print("|cff00ff00[WorldBossAnnouncer]|r Test kill mode already active. Kill any creature to trigger.")
+                print("|cff00ff00[BoneyWorldBosses]|r Test kill mode already active. Kill any creature to trigger.")
             else
                 testKillModeActive = true
                 -- Ensure we're listening for combat log events
@@ -947,19 +947,19 @@ local function SlashHandler(msg)
                 if not isLoggingEnabled then
                     LoggingCombat(true)
                     isLoggingEnabled = true
-                    print("|cffff8800[WorldBossAnnouncer]|r Combat logging enabled for test")
+                    print("|cffff8800[BoneyWorldBosses]|r Combat logging enabled for test")
                 end
-                print("|cffff8800[WorldBossAnnouncer]|r TEST KILL MODE ACTIVE")
-                print("|cffff8800[WorldBossAnnouncer]|r Kill any creature to generate a test kill report.")
-                print("|cffff8800[WorldBossAnnouncer]|r Mode will auto-disable after one kill.")
+                print("|cffff8800[BoneyWorldBosses]|r TEST KILL MODE ACTIVE")
+                print("|cffff8800[BoneyWorldBosses]|r Kill any creature to generate a test kill report.")
+                print("|cffff8800[BoneyWorldBosses]|r Mode will auto-disable after one kill.")
             end
         else
-            print("|cff00ff00[WorldBossAnnouncer]|r Test commands:")
+            print("|cff00ff00[BoneyWorldBosses]|r Test commands:")
             print("  /bwb test kill - Arm test mode (next creature kill = test report)")
         end
 
     else
-        print("|cff00ff00[WorldBossAnnouncer]|r v" .. VERSION .. " - World Boss Announcer")
+        print("|cff00ff00[BoneyWorldBosses]|r v" .. VERSION .. " - Boney World Bosses")
         print("  /bwb scout on|off    - Toggle Scout mode (combat logging)")
         print("  /bwb reporter on|off - Toggle Reporter mode (kill reports)")
         print("  /bwb status          - Show current status")
@@ -973,7 +973,7 @@ local function SlashHandler(msg)
         print("    /bwb log clear     - Clear all (or /bwb log clear N or N-M)")
         print("    /bwb log update # <field> <value> - Update kill field")
         print("")
-        print("  Settings: ESC > Interface > AddOns > WorldBossAnnouncer")
+        print("  Settings: ESC > Interface > AddOns > BoneyWorldBosses")
     end
 end
 
