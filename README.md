@@ -155,17 +155,22 @@ Both Scout and Reporter modes are **enabled by default**.
 
 ### LAYER_UPDATE Payload
 
+Single bulk request with all zones:
+
 ```json
 {
   "alertType": "LAYER_UPDATE",
   "trigger": "login",
-  "zone": "1944",
-  "layers": { "1": "106045", "2": "112071", "3": "118230" }
+  "zones": {
+    "1944": { "1": "106045", "2": "112071" },
+    "1948": { "1": "106048", "2": "112074" },
+    "1951": { "1": "106050", "2": "112076" }
+  }
 }
 ```
 
-- `zone`: UIMapID as string (e.g., `"1944"` = Hellfire Peninsula)
-- `layers`: layer number → zone instance ID
+- `zones`: object keyed by UIMapID (e.g., `"1944"` = Hellfire Peninsula)
+  - Each zone maps layer number (string) → zone instance ID (string)
 - `trigger`: `"login"`, `"logout"`, or `"manual"`
 
 ## Kill Reporting Flow

@@ -737,30 +737,21 @@ def check_layer_snapshot(state: dict, verbose: bool = False) -> None:
         trigger = snapshot["trigger"]
         zones = snapshot["zones"]
 
-        print(f"[LAYER] New layer snapshot detected (trigger: {trigger}, {len(zones)} zone(s))")
+        total_layers = sum(len(layers) for layers in zones.values())
+        print(f"[LAYER] New layer snapshot detected (trigger: {trigger}, {len(zones)} zone(s), {total_layers} mapping(s))")
 
-        all_sent = True
-        for map_id, layers in sorted(zones.items()):
-            alert = {
-                "alertType": "LAYER_UPDATE",
-                "trigger": trigger,
-                "zone": map_id,
-                "layers": layers,
-            }
+        alert = {
+            "alertType": "LAYER_UPDATE",
+            "trigger": trigger,
+            "zones": zones,
+        }
 
-            layer_count = len(layers)
-            print(f"[LAYER] Sending LAYER_UPDATE for zone {map_id}: {layer_count} layer(s)")
-            if not post_to_bot(alert):
-                print(f"[LAYER] Failed to send zone {map_id} layer update")
-                all_sent = False
-                break
-
-        if all_sent:
+        if post_to_bot(alert):
             state["last_layer_timestamp"] = snapshot["timestamp"]
             save_state(state)
-            print(f"[LAYER] Layer snapshot processed successfully")
+            print(f"[LAYER] Layer snapshot sent successfully")
         else:
-            print(f"[LAYER] Layer snapshot partially failed, will retry")
+            print(f"[LAYER] Failed to send layer snapshot, will retry")
 
     finally:
         _checking_layers = False
