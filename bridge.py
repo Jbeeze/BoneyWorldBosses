@@ -52,6 +52,9 @@ CONFIG = {
 SCRIPT_DIR = Path(__file__).parent
 STATE_FILE = SCRIPT_DIR / "bridge_state.json"
 
+# Cached character name (read from SavedVariables)
+_cached_character_name = ""
+
 
 def auto_detect_logs_dir() -> str:
     """
@@ -282,6 +285,23 @@ def find_savedvariables_file() -> str | None:
 
     # Return the most recently modified file
     return max(files, key=os.path.getmtime)
+
+
+def read_character_name() -> str:
+    """Read the top-level characterName from SavedVariables and cache it."""
+    global _cached_character_name
+    sv_file = find_savedvariables_file()
+    if not sv_file:
+        return _cached_character_name
+    try:
+        with open(sv_file, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+        match = re.search(r'\["characterName"\]\s*=\s*"([^"]*)"', content)
+        if match:
+            _cached_character_name = match.group(1)
+    except IOError:
+        pass
+    return _cached_character_name
 
 
 def parse_savedvariables(path: str, verbose: bool = False) -> dict:
@@ -539,6 +559,7 @@ def post_kill_report(kill: dict) -> bool:
         "layer": kill.get("layer", "?"),
         "layerId": kill.get("layerId", "?"),
         "msg": f"{boss_name} was killed!",
+        "characterName": kill.get("characterName", ""),
     }
 
     # Add test flag if this is a test kill
@@ -568,6 +589,9 @@ def check_pending_kills(state: dict, verbose: bool = False) -> None:
     if _checking_kills:
         return
     _checking_kills = True
+
+    # Refresh cached character name
+    read_character_name()
 
     try:
         sv_file = find_savedvariables_file()
@@ -665,6 +689,10 @@ def parse_layer_snapshot(path: str, verbose: bool = False) -> dict | None:
     trigger_match = re.search(r'\["trigger"\]\s*=\s*"([^"]*)"', snapshot_str)
     trigger = trigger_match.group(1) if trigger_match else "unknown"
 
+    # Extract characterName
+    char_match = re.search(r'\["characterName"\]\s*=\s*"([^"]*)"', snapshot_str)
+    character_name = char_match.group(1) if char_match else ""
+
     # Extract zones table
     zones_start = snapshot_str.find('["zones"]')
     if zones_start == -1:
@@ -709,6 +737,7 @@ def parse_layer_snapshot(path: str, verbose: bool = False) -> dict | None:
         "timestamp": timestamp,
         "trigger": trigger,
         "zones": zones,
+        "characterName": character_name,
     }
 
 
@@ -753,6 +782,7 @@ def check_layer_snapshot(state: dict, verbose: bool = False) -> None:
             "alertType": "LAYER_UPDATE",
             "trigger": trigger,
             "zones": zones,
+            "characterName": snapshot.get("characterName", ""),
         }
 
         print(f"[LAYER] Sending payload: {json.dumps(alert, indent=2)}")
@@ -948,6 +978,7 @@ def process_line(line: str) -> None:
         "event": result["event"],
         "msg": f"{boss_name} detected in combat!",
         "channel": "combat_log",
+        "characterName": _cached_character_name,
     }
     post_to_bot(alert)
 
@@ -977,6 +1008,11 @@ def main_loop() -> None:
         print(f"[KILL] Found SavedVariables: {os.path.basename(sv_file)}")
     else:
         print(f"[KILL] SavedVariables not found yet (will check after WoW login)")
+
+    # Read cached character name from SavedVariables
+    char_name = read_character_name()
+    if char_name:
+        print(f"[CONFIG] Character: {char_name}")
     print()
 
     # Load state

@@ -269,6 +269,7 @@ local function BuildLayerSnapshot(trigger)
         timestamp = time(),
         trigger = trigger,
         zones = zones,
+        characterName = UnitName("player"),
     }
 end
 
@@ -365,6 +366,7 @@ local function OnUnitDied(destGuid, destName)
         layer = layer,
         layerId = layerId,
         timestamp = timestamp,
+        characterName = UnitName("player"),
     }
 
     -- Mark as test if applicable
@@ -580,6 +582,9 @@ end
 
 -- AceAddon callback: called at PLAYER_LOGIN time (after all addons initialized)
 function BWB:OnEnable()
+    -- Save character name for bridge to include in webhooks
+    db.characterName = UnitName("player")
+
     -- Auto-enable combat logging if scout mode is on
     if db.config.scoutEnabled then
         LoggingCombat(true)
