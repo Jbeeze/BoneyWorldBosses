@@ -99,6 +99,11 @@ local function FormatTimeServerTime()
     return string.format("%d:%02d%s", hour, minute, ampm)
 end
 
+-- Get the NWB addon reference (must be defined before GetCurrentLayer)
+local function GetNWB()
+    return LibStub("AceAddon-3.0"):GetAddon("NovaWorldBuffs", true)
+end
+
 -- Get layer from NWB addon if available, otherwise "?"
 -- Debug flag for verbose layer lookup output
 local debugLayerLookup = false
@@ -227,10 +232,6 @@ local function pairsByKeys(t)
     end
 end
 
-local function GetNWB()
-    return LibStub("AceAddon-3.0"):GetAddon("NovaWorldBuffs", true)
-end
-
 local function BuildLayerSnapshot(trigger)
     local nwb = GetNWB()
     if not nwb then
@@ -339,7 +340,6 @@ local function OnUnitDied(destGuid, destName)
 
         bossKey = "test"
         bossDisplayName = destName or "Unknown Creature"  -- Use actual creature name
-        layer = "0"  -- Test kills always use layer 0
     else
         -- Normal mode: check if Reporter is enabled and this is a boss
         if not db.config.reporterEnabled then
