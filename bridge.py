@@ -96,6 +96,9 @@ COMBAT_EVENTS = {
     "SPELL_AURA_APPLIED",
 }
 
+# Max age (seconds) for a layer snapshot to be considered fresh
+LAYER_STALENESS_WINDOW = 600  # 10 minutes
+
 # =============================================================================
 # COMBAT LOG PARSING
 # =============================================================================
@@ -766,6 +769,12 @@ def check_layer_snapshot(state: dict, verbose: bool = False) -> None:
         if snapshot["timestamp"] <= last_ts:
             if verbose:
                 print(f"[LAYER] Snapshot timestamp {snapshot['timestamp']} already sent (last: {last_ts})")
+            return
+
+        # Skip stale snapshots (e.g. bridge started before player logged in)
+        age = time.time() - snapshot["timestamp"]
+        if age > LAYER_STALENESS_WINDOW:
+            print(f"[LAYER] Skipping stale snapshot ({int(age)}s old, threshold {LAYER_STALENESS_WINDOW}s)")
             return
 
         trigger = snapshot["trigger"]
