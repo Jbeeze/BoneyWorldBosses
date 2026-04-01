@@ -1205,24 +1205,15 @@ frame:SetScript("OnEvent", function(self, event, ...)
         WriteLayerSnapshot("logout")
         -- Auto scout-off on logout/exit (skip if there's already a pending report,
         -- e.g. a scout-on that triggered this ReloadUI)
+        -- NOTE: Do NOT call C_Map or other world APIs here — they can error during
+        -- PLAYER_LOGOUT and abort the handler. Use only persisted context data.
         if db and db.scoutingActive and not reloadingForScout then
-            local offBoss = ""
-            local offLayer = "?"
-            local offLayerId = "?"
-            local bossKey, _ = GetPlayerZoneBoss()
-            if bossKey then
-                offBoss = bossKey
-                offLayer, offLayerId = GetCurrentLayerInfo()
-            elseif db.scoutingContext then
-                offBoss = db.scoutingContext.boss or ""
-                offLayer = db.scoutingContext.layer or "?"
-                offLayerId = db.scoutingContext.layerId or "?"
-            end
+            local ctx = db.scoutingContext or {}
             db.scoutReport = {
                 action = "off",
-                boss = offBoss,
-                layer = offLayer,
-                layerId = offLayerId,
+                boss = ctx.boss or "",
+                layer = ctx.layer or "?",
+                layerId = ctx.layerId or "?",
                 characterName = UnitName("player"),
                 timestamp = time(),
             }
