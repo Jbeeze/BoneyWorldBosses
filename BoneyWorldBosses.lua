@@ -793,11 +793,20 @@ local function SlashHandler(msg)
             LoggingCombat(false)
             isLoggingEnabled = false
             print("|cff00ff00[BoneyWorldBosses]|r Scout mode |cffff0000DISABLED|r - Combat logging OFF")
-            -- Send scout-off report to Discord
-            local ctx = db.scoutingContext or {}
-            local offBoss = ctx.boss or ""
-            local offLayer = ctx.layer or "?"
-            local offLayerId = ctx.layerId or "?"
+            -- Send scout-off report to Discord (detect boss/layer fresh from current zone)
+            local offBoss = ""
+            local offLayer = "?"
+            local offLayerId = "?"
+            local bossKey, _ = GetPlayerZoneBoss()
+            if bossKey then
+                offBoss = bossKey
+                offLayer, offLayerId = GetCurrentLayerInfo()
+            elseif db.scoutingContext then
+                -- Fallback to saved context if player left the boss zone
+                offBoss = db.scoutingContext.boss or ""
+                offLayer = db.scoutingContext.layer or "?"
+                offLayerId = db.scoutingContext.layerId or "?"
+            end
             local offDisplayName = BOSS_DISPLAY_NAMES[offBoss] or "Unknown"
             db.scoutReport = {
                 action = "off",
