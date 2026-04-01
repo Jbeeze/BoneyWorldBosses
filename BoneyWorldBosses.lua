@@ -394,6 +394,9 @@ local isLoggingEnabled = false
 -- Test kill mode: next UNIT_DIED triggers a test kill report
 local testKillModeActive = false
 
+-- Flag to distinguish scout ReloadUI from real logout (not persisted)
+local reloadingForScout = false
+
 -- =============================================================================
 -- KILL DETECTION
 -- =============================================================================
@@ -533,6 +536,7 @@ StaticPopupDialogs["WBA_CONFIRM_SCOUT_ON"] = {
     button2 = "Cancel",
     OnAccept = function()
         print("|cff00ff00[BoneyWorldBosses]|r Reloading UI to send scout report...")
+        reloadingForScout = true
         ReloadUI()
     end,
     OnCancel = function()
@@ -554,6 +558,7 @@ StaticPopupDialogs["WBA_CONFIRM_SCOUT_OFF"] = {
     button2 = "Cancel",
     OnAccept = function()
         print("|cff00ff00[BoneyWorldBosses]|r Reloading UI to send scout-off report...")
+        reloadingForScout = true
         ReloadUI()
     end,
     OnCancel = function()
@@ -1196,7 +1201,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
         WriteLayerSnapshot("logout")
         -- Auto scout-off on logout/exit (skip if there's already a pending report,
         -- e.g. a scout-on that triggered this ReloadUI)
-        if db and db.scoutingActive and not db.scoutReport then
+        if db and db.scoutingActive and not reloadingForScout then
             local offBoss = ""
             local offLayer = "?"
             local offLayerId = "?"
