@@ -527,7 +527,7 @@ StaticPopupDialogs["WBA_CONFIRM_LAYER_SNAPSHOT"] = {
     preferredIndex = 3,
 }
 
-StaticPopupDialogs["WBA_CONFIRM_SCOUT_REPORT"] = {
+StaticPopupDialogs["WBA_CONFIRM_SCOUT_ON"] = {
     text = "Start Scouting\n\n%s on Layer %s\n\n|cffff8800Warning:|r This will reload your UI",
     button1 = "Start Scouting",
     button2 = "Cancel",
@@ -540,6 +540,26 @@ StaticPopupDialogs["WBA_CONFIRM_SCOUT_REPORT"] = {
         if db then
             db.scoutReport = nil
             db.scoutingActive = false
+        end
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
+StaticPopupDialogs["WBA_CONFIRM_SCOUT_OFF"] = {
+    text = "Stop Scouting\n\n%s on Layer %s\n\n|cffff8800Warning:|r This will reload your UI",
+    button1 = "Stop Scouting",
+    button2 = "Cancel",
+    OnAccept = function()
+        print("|cff00ff00[BoneyWorldBosses]|r Reloading UI to send scout-off report...")
+        ReloadUI()
+    end,
+    OnCancel = function()
+        print("|cff00ff00[BoneyWorldBosses]|r Scout-off cancelled.")
+        if db then
+            db.scoutReport = nil
         end
     end,
     timeout = 0,
@@ -766,7 +786,7 @@ local function SlashHandler(msg)
             }
             db.scoutingActive = true
             db.scoutingContext = { boss = bossKey, layer = layer, layerId = layerId }
-            StaticPopup_Show("WBA_CONFIRM_SCOUT_REPORT", displayName, layer)
+            StaticPopup_Show("WBA_CONFIRM_SCOUT_ON", displayName, layer)
         elseif setting == "off" then
             -- Disable combat logging
             db.config.scoutEnabled = false
@@ -775,18 +795,21 @@ local function SlashHandler(msg)
             print("|cff00ff00[BoneyWorldBosses]|r Scout mode |cffff0000DISABLED|r - Combat logging OFF")
             -- Send scout-off report to Discord
             local ctx = db.scoutingContext or {}
+            local offBoss = ctx.boss or ""
+            local offLayer = ctx.layer or "?"
+            local offLayerId = ctx.layerId or "?"
+            local offDisplayName = BOSS_DISPLAY_NAMES[offBoss] or "Unknown"
             db.scoutReport = {
                 action = "off",
-                boss = ctx.boss or "",
-                layer = ctx.layer or "?",
-                layerId = ctx.layerId or "?",
+                boss = offBoss,
+                layer = offLayer,
+                layerId = offLayerId,
                 characterName = UnitName("player"),
                 timestamp = time(),
             }
             db.scoutingActive = false
             db.scoutingContext = nil
-            print("|cff00ff00[BoneyWorldBosses]|r Stopping scout report, reloading...")
-            ReloadUI()
+            StaticPopup_Show("WBA_CONFIRM_SCOUT_OFF", offDisplayName, offLayer)
         else
             print("|cff00ff00[BoneyWorldBosses]|r Usage: /bwb scout on|off")
         end
