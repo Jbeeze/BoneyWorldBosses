@@ -40,7 +40,6 @@ local DB_DEFAULTS = {
     config = {
         scoutEnabled = true,    -- Combat log detection (existing)
         reporterEnabled = true, -- Kill reporting (new)
-        discordId = "",         -- User's Discord ID for bot matching
     },
     pendingKills = {},
     -- pendingKills format:
@@ -356,7 +355,6 @@ local function BuildLayerSnapshot(trigger)
         trigger = trigger,
         zones = zones,
         characterName = UnitName("player"),
-        discordId = db.config.discordId,
     }
 end
 
@@ -456,7 +454,6 @@ local function OnUnitDied(destGuid, destName)
         layerId = layerId,
         timestamp = timestamp,
         characterName = UnitName("player"),
-        discordId = db.config.discordId,
     }
 
     -- Mark as test if applicable
@@ -721,7 +718,6 @@ end
 function BWB:OnEnable()
     -- Save character name for bridge to include in webhooks
     db.characterName = UnitName("player")
-    db.discordId = db.config.discordId
 
     -- Auto-enable combat logging if scout mode is on
     if db.config.scoutEnabled then
@@ -795,8 +791,7 @@ local function SlashHandler(msg)
                 layer = layer,
                 layerId = layerId,
                 characterName = UnitName("player"),
-                discordId = db.config.discordId,
-                timestamp = time(),
+                        timestamp = time(),
             }
             db.scoutingActive = true
             db.scoutingContext = { boss = bossKey, layer = layer, layerId = layerId }
@@ -828,8 +823,7 @@ local function SlashHandler(msg)
                 layer = offLayer,
                 layerId = offLayerId,
                 characterName = UnitName("player"),
-                discordId = db.config.discordId,
-                timestamp = time(),
+                        timestamp = time(),
             }
             db.scoutingActive = false
             db.scoutingContext = nil
@@ -882,21 +876,7 @@ local function SlashHandler(msg)
         print("  Test kill mode: " .. testStatus)
         print("  Scouting report: " .. scoutingReportStatus)
         print("  Pending kills: " .. #db.pendingKills)
-        local discordStatus = (db.config.discordId and db.config.discordId ~= "") and db.config.discordId or "|cffff0000not set|r"
-        print("  Discord ID: " .. discordStatus)
         print("  Log file: WoW/_anniversary_/Logs/WoWCombatLog.txt")
-
-    elseif cmd == "discord" then
-        local id = args[2]
-        if not id or id == "" then
-            local current = (db.config.discordId and db.config.discordId ~= "") and db.config.discordId or "not set"
-            print("|cff00ff00[BoneyWorldBosses]|r Discord ID: " .. current)
-            print("  Usage: /bwb discord <your_discord_id>")
-        else
-            db.config.discordId = id
-            db.discordId = id
-            print("|cff00ff00[BoneyWorldBosses]|r Discord ID set to: " .. id)
-        end
 
     elseif cmd == "pending" then
         -- Legacy alias for /bwb log status
@@ -1196,7 +1176,6 @@ local function SlashHandler(msg)
         print("  /bwb status           - Show current status")
         print("  /bwb log              - Kill report management (status/clear/update)")
         print("  /bwb options          - Open settings panel")
-        print("  /bwb discord <id>     - Set your Discord ID")
         print("  /bwb test kill        - Test mode (next creature kill = test report)")
         print("  /bwb layers           - Send layer update to Discord (reloads UI)")
         print("")
@@ -1236,8 +1215,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 layer = ctx.layer or "?",
                 layerId = ctx.layerId or "?",
                 characterName = UnitName("player"),
-                discordId = db.config.discordId,
-                timestamp = time(),
+                        timestamp = time(),
             }
             db.scoutingActive = false
             db.scoutingContext = nil
