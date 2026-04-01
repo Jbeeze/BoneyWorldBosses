@@ -741,19 +741,40 @@ local function SlashHandler(msg)
     if cmd == "scout" then
         local setting = args[2]
         if setting == "on" then
+            -- Enable combat logging
             db.config.scoutEnabled = true
             LoggingCombat(true)
             isLoggingEnabled = true
             print("|cff00ff00[BoneyWorldBosses]|r Scout mode |cff00ff00ENABLED|r - Combat logging ON")
+            -- Send scout report to Discord
+            local bossKey, zoneName = GetPlayerZoneBoss()
+            if not bossKey then
+                local zoneMsg = zoneName and (" (current zone: " .. zoneName .. ")") or ""
+                print("|cffff0000[BoneyWorldBosses]|r Not in a boss zone" .. zoneMsg .. " - scout report not sent")
+                print("|cffff0000[BoneyWorldBosses]|r Must be in Hellfire Peninsula or Shadowmoon Valley to report")
+                return
+            end
+            local layer, layerId = GetCurrentLayerInfo()
+            local displayName = BOSS_DISPLAY_NAMES[bossKey]
+            db.scoutReport = {
+                action = "on",
+                boss = bossKey,
+                layer = layer,
+                layerId = layerId,
+                characterName = UnitName("player"),
+                timestamp = time(),
+            }
+            db.scoutingActive = true
+            db.scoutingContext = { boss = bossKey, layer = layer, layerId = layerId }
+            StaticPopup_Show("WBA_CONFIRM_SCOUT_REPORT", displayName, layer)
         elseif setting == "off" then
+            -- Disable combat logging
             db.config.scoutEnabled = false
             LoggingCombat(false)
             isLoggingEnabled = false
             print("|cff00ff00[BoneyWorldBosses]|r Scout mode |cffff0000DISABLED|r - Combat logging OFF")
-        elseif setting == "report" then
-            local reportArg = args[3]
-            if reportArg == "off" then
-                -- Scout report OFF (include boss/layer from when scouting started)
+            -- Send scout-off report to Discord
+            if db.scoutingActive then
                 local ctx = db.scoutingContext or {}
                 db.scoutReport = {
                     action = "off",
@@ -767,34 +788,9 @@ local function SlashHandler(msg)
                 db.scoutingContext = nil
                 print("|cff00ff00[BoneyWorldBosses]|r Stopping scout report, reloading...")
                 ReloadUI()
-            else
-                -- Scout report ON
-                local bossKey, zoneName = GetPlayerZoneBoss()
-                if not bossKey then
-                    local zoneMsg = zoneName and (" (current zone: " .. zoneName .. ")") or ""
-                    print("|cffff0000[BoneyWorldBosses]|r Not in a boss zone" .. zoneMsg)
-                    print("|cffff0000[BoneyWorldBosses]|r Must be in Hellfire Peninsula or Shadowmoon Valley")
-                    return
-                end
-                local layer, layerId = GetCurrentLayerInfo()
-                local displayName = BOSS_DISPLAY_NAMES[bossKey]
-                db.scoutReport = {
-                    action = "on",
-                    boss = bossKey,
-                    layer = layer,
-                    layerId = layerId,
-                    characterName = UnitName("player"),
-                    timestamp = time(),
-                }
-                db.scoutingActive = true
-                db.scoutingContext = { boss = bossKey, layer = layer, layerId = layerId }
-                StaticPopup_Show("WBA_CONFIRM_SCOUT_REPORT", displayName, layer)
             end
         else
-            print("|cff00ff00[BoneyWorldBosses]|r Usage:")
-            print("  /bwb scout on|off     - Toggle combat logging")
-            print("  /bwb scout report     - Start scouting (zone auto-detected)")
-            print("  /bwb scout report off - Stop scouting")
+            print("|cff00ff00[BoneyWorldBosses]|r Usage: /bwb scout on|off")
         end
 
     elseif cmd == "reporter" then
@@ -1136,9 +1132,7 @@ local function SlashHandler(msg)
 
     else
         print("|cff00ff00[BoneyWorldBosses]|r v" .. VERSION .. " - Boney World Bosses")
-        print("  /bwb scout on|off     - Toggle Scout mode (combat logging)")
-        print("  /bwb scout report     - Start scouting boss zone (reloads UI)")
-        print("  /bwb scout report off - Stop scouting (reloads UI)")
+        print("  /bwb scout on|off     - Toggle scouting (combat log + Discord report)")
         print("  /bwb reporter on|off  - Toggle Reporter mode (kill reports)")
         print("  /bwb status           - Show current status")
         print("  /bwb log              - Kill report management (status/clear/update)")
