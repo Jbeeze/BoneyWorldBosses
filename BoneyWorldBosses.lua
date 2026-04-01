@@ -1164,8 +1164,9 @@ frame:SetScript("OnEvent", function(self, event, ...)
         OnCombatLogEvent()
     elseif event == "PLAYER_LOGOUT" then
         WriteLayerSnapshot("logout")
-        -- Auto scout-off on logout
-        if db and db.scoutingActive then
+        -- Auto scout-off on logout (skip if there's already a pending report,
+        -- e.g. a scout-on that triggered this ReloadUI)
+        if db and db.scoutingActive and not db.scoutReport then
             local ctx = db.scoutingContext or {}
             db.scoutReport = {
                 action = "off",
