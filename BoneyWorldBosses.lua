@@ -780,6 +780,10 @@ local function SlashHandler(msg)
                 return
             end
             local layer, layerId = GetCurrentLayerInfo()
+            if layer == "?" or layerId == "?" then
+                print("|cffff0000[BoneyWorldBosses]|r Layer not detected. Hover over an NPC and wait a few seconds, then try again.")
+                return
+            end
             local displayName = BOSS_DISPLAY_NAMES[bossKey]
             db.scoutReport = {
                 action = "on",
