@@ -961,22 +961,20 @@ def check_scout_report(state: dict, verbose: bool = False) -> None:
         layer_id = report.get("layerId", "?")
         character_name = report.get("characterName", "")
 
+        boss_name = BOSS_KEY_TO_NAME.get(boss, boss)
         if action == "on":
-            boss_name = BOSS_KEY_TO_NAME.get(boss, boss)
             print(f"[SCOUT] New scout report: {character_name} scouting {boss_name} on Layer {layer} ({layer_id})")
         else:
-            print(f"[SCOUT] Scout off report from {character_name}")
+            print(f"[SCOUT] Scout off report from {character_name} ({boss_name} L{layer})")
 
         alert = {
             "alertType": "SCOUT_REPORT",
             "action": action,
+            "boss": boss,
+            "layer": layer,
+            "layerId": layer_id,
             "characterName": character_name,
         }
-
-        if action == "on":
-            alert["boss"] = boss
-            alert["layer"] = layer
-            alert["layerId"] = layer_id
 
         if post_to_bot(alert):
             state["last_scout_timestamp"] = report["timestamp"]

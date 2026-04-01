@@ -51,6 +51,9 @@ local DB_DEFAULTS = {
     -- scoutReport format:
     -- { action = "on", boss = "doomwalker", layer = "3", layerId = "11640", characterName = "Name", timestamp = 1711043445 }
     scoutingActive = false,
+    scoutingContext = nil,
+    -- scoutingContext format (saved when scout-on is sent, used for scout-off):
+    -- { boss = "doomwalker", layer = "3", layerId = "11640" }
 }
 
 -- Reference to saved variables (set on ADDON_LOADED)
@@ -750,13 +753,18 @@ local function SlashHandler(msg)
         elseif setting == "report" then
             local reportArg = args[3]
             if reportArg == "off" then
-                -- Scout report OFF
+                -- Scout report OFF (include boss/layer from when scouting started)
+                local ctx = db.scoutingContext or {}
                 db.scoutReport = {
                     action = "off",
+                    boss = ctx.boss or "",
+                    layer = ctx.layer or "?",
+                    layerId = ctx.layerId or "?",
                     characterName = UnitName("player"),
                     timestamp = time(),
                 }
                 db.scoutingActive = false
+                db.scoutingContext = nil
                 print("|cff00ff00[BoneyWorldBosses]|r Stopping scout report, reloading...")
                 ReloadUI()
             else
@@ -779,6 +787,7 @@ local function SlashHandler(msg)
                     timestamp = time(),
                 }
                 db.scoutingActive = true
+                db.scoutingContext = { boss = bossKey, layer = layer, layerId = layerId }
                 StaticPopup_Show("WBA_CONFIRM_SCOUT_REPORT", displayName, layer)
             end
         else
@@ -1163,12 +1172,17 @@ frame:SetScript("OnEvent", function(self, event, ...)
         WriteLayerSnapshot("logout")
         -- Auto scout-off on logout
         if db and db.scoutingActive then
+            local ctx = db.scoutingContext or {}
             db.scoutReport = {
                 action = "off",
+                boss = ctx.boss or "",
+                layer = ctx.layer or "?",
+                layerId = ctx.layerId or "?",
                 characterName = UnitName("player"),
                 timestamp = time(),
             }
             db.scoutingActive = false
+            db.scoutingContext = nil
         end
     end
 end)
