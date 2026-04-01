@@ -1194,15 +1194,26 @@ frame:SetScript("OnEvent", function(self, event, ...)
         OnCombatLogEvent()
     elseif event == "PLAYER_LOGOUT" then
         WriteLayerSnapshot("logout")
-        -- Auto scout-off on logout (skip if there's already a pending report,
+        -- Auto scout-off on logout/exit (skip if there's already a pending report,
         -- e.g. a scout-on that triggered this ReloadUI)
         if db and db.scoutingActive and not db.scoutReport then
-            local ctx = db.scoutingContext or {}
+            local offBoss = ""
+            local offLayer = "?"
+            local offLayerId = "?"
+            local bossKey, _ = GetPlayerZoneBoss()
+            if bossKey then
+                offBoss = bossKey
+                offLayer, offLayerId = GetCurrentLayerInfo()
+            elseif db.scoutingContext then
+                offBoss = db.scoutingContext.boss or ""
+                offLayer = db.scoutingContext.layer or "?"
+                offLayerId = db.scoutingContext.layerId or "?"
+            end
             db.scoutReport = {
                 action = "off",
-                boss = ctx.boss or "",
-                layer = ctx.layer or "?",
-                layerId = ctx.layerId or "?",
+                boss = offBoss,
+                layer = offLayer,
+                layerId = offLayerId,
                 characterName = UnitName("player"),
                 timestamp = time(),
             }
