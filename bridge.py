@@ -875,59 +875,6 @@ def parse_scout_report(path: str, verbose: bool = False) -> dict | None:
     return report
 
 
-def clear_scout_report_from_savedvariables() -> bool:
-    """Clear scoutReport from SavedVariables after successful POST."""
-    sv_file = find_savedvariables_file()
-    if not sv_file:
-        return False
-
-    try:
-        with open(sv_file, "r", encoding="utf-8", errors="replace") as f:
-            content = f.read()
-    except IOError:
-        return False
-
-    report_start = content.find('["scoutReport"]')
-    if report_start == -1:
-        return True
-
-    # Check if already nil
-    nil_check = content[report_start:report_start + 50]
-    if re.search(r'\["scoutReport"\]\s*=\s*nil', nil_check):
-        return True
-
-    data_start = content.find('{', report_start)
-    if data_start == -1:
-        return True
-
-    # Find matching closing brace
-    brace_count = 0
-    data_end = data_start
-    for i in range(data_start, len(content)):
-        if content[i] == '{':
-            brace_count += 1
-        elif content[i] == '}':
-            brace_count -= 1
-            if brace_count == 0:
-                data_end = i
-                break
-
-    # Replace the table with nil, consuming trailing comma if present
-    after = content[data_end + 1:]
-    after = after.lstrip(' \t')
-    if after.startswith(','):
-        after = after[1:]
-
-    new_content = content[:report_start] + '["scoutReport"] = nil' + after
-
-    try:
-        with open(sv_file, "w", encoding="utf-8") as f:
-            f.write(new_content)
-        return True
-    except IOError:
-        return False
-
-
 _checking_scout = False
 
 
@@ -979,7 +926,6 @@ def check_scout_report(state: dict, verbose: bool = False) -> None:
         if post_to_bot(alert):
             state["last_scout_timestamp"] = report["timestamp"]
             save_state(state)
-            clear_scout_report_from_savedvariables()
             print(f"[SCOUT] Successfully reported scout {action}")
         else:
             print(f"[SCOUT] Failed to send scout report, will retry")
