@@ -774,21 +774,19 @@ local function SlashHandler(msg)
             isLoggingEnabled = false
             print("|cff00ff00[BoneyWorldBosses]|r Scout mode |cffff0000DISABLED|r - Combat logging OFF")
             -- Send scout-off report to Discord
-            if db.scoutingActive then
-                local ctx = db.scoutingContext or {}
-                db.scoutReport = {
-                    action = "off",
-                    boss = ctx.boss or "",
-                    layer = ctx.layer or "?",
-                    layerId = ctx.layerId or "?",
-                    characterName = UnitName("player"),
-                    timestamp = time(),
-                }
-                db.scoutingActive = false
-                db.scoutingContext = nil
-                print("|cff00ff00[BoneyWorldBosses]|r Stopping scout report, reloading...")
-                ReloadUI()
-            end
+            local ctx = db.scoutingContext or {}
+            db.scoutReport = {
+                action = "off",
+                boss = ctx.boss or "",
+                layer = ctx.layer or "?",
+                layerId = ctx.layerId or "?",
+                characterName = UnitName("player"),
+                timestamp = time(),
+            }
+            db.scoutingActive = false
+            db.scoutingContext = nil
+            print("|cff00ff00[BoneyWorldBosses]|r Stopping scout report, reloading...")
+            ReloadUI()
         else
             print("|cff00ff00[BoneyWorldBosses]|r Usage: /bwb scout on|off")
         end
