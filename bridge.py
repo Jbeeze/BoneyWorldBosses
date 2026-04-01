@@ -250,7 +250,7 @@ def load_state() -> dict:
                 return json.load(f)
         except (json.JSONDecodeError, IOError):
             pass
-    return {"last_inode": 0, "last_pos": 0, "reported_kills": [], "last_layer_timestamp": 0}
+    return {"last_inode": 0, "last_pos": 0, "reported_kills": [], "last_layer_timestamp": 0, "last_scout_timestamp": 0}
 
 
 def save_state(state: dict) -> None:
@@ -808,6 +808,189 @@ def check_layer_snapshot(state: dict, verbose: bool = False) -> None:
 
 
 # =============================================================================
+# SCOUT REPORT HANDLING
+# =============================================================================
+
+def parse_scout_report(path: str, verbose: bool = False) -> dict | None:
+    """Parse scoutReport from SavedVariables. Returns dict or None."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+    except IOError:
+        return None
+
+    report_start = content.find('["scoutReport"]')
+    if report_start == -1:
+        return None
+
+    # Check for nil value (cleared report)
+    nil_check = content[report_start:report_start + 50]
+    if re.search(r'\["scoutReport"\]\s*=\s*nil', nil_check):
+        return None
+
+    data_start = content.find('{', report_start)
+    if data_start == -1:
+        return None
+
+    # Find matching closing brace
+    brace_count = 0
+    data_end = data_start
+    for i in range(data_start, len(content)):
+        if content[i] == '{':
+            brace_count += 1
+        elif content[i] == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                data_end = i
+                break
+
+    report_str = content[data_start:data_end + 1]
+
+    # Extract fields using same regex as other parsers
+    field_pattern = re.compile(r'\["(\w+)"\]\s*=\s*(?:"([^"]*)"|([\d.]+)|(true|false|nil))')
+    report = {}
+    for match in field_pattern.finditer(report_str):
+        key = match.group(1)
+        str_val = match.group(2)
+        num_val = match.group(3)
+        bool_val = match.group(4)
+        if str_val is not None:
+            report[key] = str_val
+        elif num_val is not None:
+            if key == "timestamp":
+                report[key] = int(float(num_val))
+            else:
+                report[key] = num_val
+        elif bool_val is not None:
+            report[key] = bool_val == "true" if bool_val != "nil" else None
+
+    if "action" not in report or "timestamp" not in report:
+        if verbose:
+            print("[SCOUT] Incomplete scout report, missing required fields")
+        return None
+
+    if verbose:
+        print(f"[SCOUT] Parsed report: action={report.get('action')}, boss={report.get('boss', 'N/A')}, layer={report.get('layer', '?')}")
+
+    return report
+
+
+def clear_scout_report_from_savedvariables() -> bool:
+    """Clear scoutReport from SavedVariables after successful POST."""
+    sv_file = find_savedvariables_file()
+    if not sv_file:
+        return False
+
+    try:
+        with open(sv_file, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+    except IOError:
+        return False
+
+    report_start = content.find('["scoutReport"]')
+    if report_start == -1:
+        return True
+
+    # Check if already nil
+    nil_check = content[report_start:report_start + 50]
+    if re.search(r'\["scoutReport"\]\s*=\s*nil', nil_check):
+        return True
+
+    data_start = content.find('{', report_start)
+    if data_start == -1:
+        return True
+
+    # Find matching closing brace
+    brace_count = 0
+    data_end = data_start
+    for i in range(data_start, len(content)):
+        if content[i] == '{':
+            brace_count += 1
+        elif content[i] == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                data_end = i
+                break
+
+    # Replace the table with nil, consuming trailing comma if present
+    after = content[data_end + 1:]
+    after = after.lstrip(' \t')
+    if after.startswith(','):
+        after = after[1:]
+
+    new_content = content[:report_start] + '["scoutReport"] = nil' + after
+
+    try:
+        with open(sv_file, "w", encoding="utf-8") as f:
+            f.write(new_content)
+        return True
+    except IOError:
+        return False
+
+
+_checking_scout = False
+
+
+def check_scout_report(state: dict, verbose: bool = False) -> None:
+    """Check SavedVariables for new scout report and send SCOUT_REPORT webhook."""
+    global _checking_scout
+    if _checking_scout:
+        return
+    _checking_scout = True
+
+    try:
+        sv_file = find_savedvariables_file()
+        if not sv_file:
+            return
+
+        report = parse_scout_report(sv_file, verbose=verbose)
+        if not report:
+            if verbose:
+                print("[SCOUT] No scout report found in SavedVariables")
+            return
+
+        last_ts = state.get("last_scout_timestamp", 0)
+        if report["timestamp"] <= last_ts:
+            if verbose:
+                print(f"[SCOUT] Report timestamp {report['timestamp']} already sent (last: {last_ts})")
+            return
+
+        action = report.get("action", "unknown")
+        boss = report.get("boss", "")
+        layer = report.get("layer", "?")
+        layer_id = report.get("layerId", "?")
+        character_name = report.get("characterName", "")
+
+        if action == "on":
+            boss_name = BOSS_KEY_TO_NAME.get(boss, boss)
+            print(f"[SCOUT] New scout report: {character_name} scouting {boss_name} on Layer {layer} ({layer_id})")
+        else:
+            print(f"[SCOUT] Scout off report from {character_name}")
+
+        alert = {
+            "alertType": "SCOUT_REPORT",
+            "action": action,
+            "characterName": character_name,
+        }
+
+        if action == "on":
+            alert["boss"] = boss
+            alert["layer"] = layer
+            alert["layerId"] = layer_id
+
+        if post_to_bot(alert):
+            state["last_scout_timestamp"] = report["timestamp"]
+            save_state(state)
+            clear_scout_report_from_savedvariables()
+            print(f"[SCOUT] Successfully reported scout {action}")
+        else:
+            print(f"[SCOUT] Failed to send scout report, will retry")
+
+    finally:
+        _checking_scout = False
+
+
+# =============================================================================
 # FILE TAILING
 # =============================================================================
 
@@ -863,6 +1046,7 @@ def tail_log_file(state: dict):
             if now - last_kill_check >= CONFIG["KILL_REPORT_CHECK_INTERVAL"]:
                 check_pending_kills(state, verbose=False)
                 check_layer_snapshot(state, verbose=False)
+                check_scout_report(state, verbose=False)
                 last_kill_check = now
 
             # Find the latest combat log file
@@ -1034,6 +1218,10 @@ def main_loop() -> None:
     # Do initial layer snapshot check (verbose)
     print("[LAYER] Checking for layer snapshot...")
     check_layer_snapshot(state, verbose=True)
+
+    # Do initial scout report check (verbose)
+    print("[SCOUT] Checking for scout report...")
+    check_scout_report(state, verbose=True)
 
     try:
         for line in tail_log_file(state):

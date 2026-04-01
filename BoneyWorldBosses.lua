@@ -6,7 +6,7 @@
 --   Layer Updates: NWB layer data reporting to Discord
 
 local ADDON_NAME = "BoneyWorldBosses"
-local VERSION = "3.2.0"
+local VERSION = "3.3.0"
 
 -- Create AceAddon (NWB bundles LibStub + AceAddon-3.0)
 local BWB = LibStub("AceAddon-3.0"):NewAddon(ADDON_NAME)
@@ -25,6 +25,12 @@ local BOSS_DISPLAY_NAMES = {
     doomwalker = "Doomwalker",
 }
 
+-- Map zone names to boss keys (for scout report auto-detection)
+local ZONE_TO_BOSS = {
+    ["Hellfire Peninsula"] = "kazzak",
+    ["Shadowmoon Valley"] = "doomwalker",
+}
+
 -- =============================================================================
 -- SAVED VARIABLES
 -- =============================================================================
@@ -41,6 +47,10 @@ local DB_DEFAULTS = {
     layerSnapshot = nil,
     -- layerSnapshot format:
     -- { timestamp = 1711043445, trigger = "login", zones = { ["1944"] = { ["1"] = "106045" } } }
+    scoutReport = nil,
+    -- scoutReport format:
+    -- { action = "on", boss = "doomwalker", layer = "3", layerId = "11640", characterName = "Name", timestamp = 1711043445 }
+    scoutingActive = false,
 }
 
 -- Reference to saved variables (set on ADDON_LOADED)
@@ -230,6 +240,77 @@ local function pairsByKeys(t)
             return keys[i], t[keys[i]]
         end
     end
+end
+
+-- Get the boss key for the player's current zone, or nil if not in a boss zone
+local function GetPlayerZoneBoss()
+    local mapID = C_Map.GetBestMapForUnit("player")
+    if not mapID then return nil, nil end
+    local mapInfo = C_Map.GetMapInfo(mapID)
+    if not mapInfo or not mapInfo.name then return nil, nil end
+    return ZONE_TO_BOSS[mapInfo.name], mapInfo.name
+end
+
+-- Get current layer number and instance ID without needing a creature GUID
+-- Returns layerNumber, layerId (both as strings)
+local function GetCurrentLayerInfo()
+    local nwb = GetNWB()
+    if not nwb then
+        return "?", "?"
+    end
+
+    -- Get layer number from NWB
+    local layerNum = nil
+    if nwb.currentLayer and nwb.currentLayer > 0 then
+        layerNum = nwb.currentLayer
+    elseif nwb.currentLayerShared and nwb.currentLayerShared > 0 then
+        layerNum = nwb.currentLayerShared
+    elseif nwb.lastKnownLayer and nwb.lastKnownLayer > 0 then
+        layerNum = nwb.lastKnownLayer
+    elseif nwb.lastKnownLayerNum and nwb.lastKnownLayerNum > 0 then
+        layerNum = nwb.lastKnownLayerNum
+    end
+
+    if not layerNum then
+        return "?", "?"
+    end
+
+    -- Get instance ID by reverse-looking up the player's zone in NWB layer data
+    local layerId = "?"
+    if nwb.data and nwb.data.layers then
+        local count = 0
+        for layerKey, layerData in pairsByKeys(nwb.data.layers) do
+            count = count + 1
+            if count == layerNum and layerData and layerData.layerMap then
+                local mapID = C_Map.GetBestMapForUnit("player")
+                if mapID then
+                    for zoneInstId, uiMapId in pairs(layerData.layerMap) do
+                        if type(uiMapId) == "number" and uiMapId == mapID then
+                            layerId = tostring(zoneInstId)
+                            break
+                        end
+                    end
+                    -- Fallback: use any instance ID from this layer
+                    if layerId == "?" then
+                        for zoneInstId, uiMapId in pairs(layerData.layerMap) do
+                            if type(uiMapId) == "number" then
+                                layerId = tostring(zoneInstId)
+                                break
+                            end
+                        end
+                    end
+                end
+                break
+            end
+        end
+    end
+
+    -- Secondary fallback
+    if layerId == "?" and nwb.lastKnownLayerID then
+        layerId = tostring(nwb.lastKnownLayerID)
+    end
+
+    return tostring(layerNum), layerId
 end
 
 local function BuildLayerSnapshot(trigger)
@@ -443,6 +524,27 @@ StaticPopupDialogs["WBA_CONFIRM_LAYER_SNAPSHOT"] = {
     preferredIndex = 3,
 }
 
+StaticPopupDialogs["WBA_CONFIRM_SCOUT_REPORT"] = {
+    text = "Start Scouting\n\n%s on Layer %s\n\n|cffff8800Warning:|r This will reload your UI",
+    button1 = "Start Scouting",
+    button2 = "Cancel",
+    OnAccept = function()
+        print("|cff00ff00[BoneyWorldBosses]|r Reloading UI to send scout report...")
+        ReloadUI()
+    end,
+    OnCancel = function()
+        print("|cff00ff00[BoneyWorldBosses]|r Scout report cancelled.")
+        if db then
+            db.scoutReport = nil
+            db.scoutingActive = false
+        end
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
 -- =============================================================================
 -- INTERFACE OPTIONS PANEL
 -- =============================================================================
@@ -564,6 +666,10 @@ local function InitializeSavedVariables()
         BoneyWorldBossesDB.pendingKills = {}
     end
 
+    if BoneyWorldBossesDB.scoutingActive == nil then
+        BoneyWorldBossesDB.scoutingActive = false
+    end
+
     -- Set local reference
     db = BoneyWorldBossesDB
 end
@@ -641,8 +747,45 @@ local function SlashHandler(msg)
             LoggingCombat(false)
             isLoggingEnabled = false
             print("|cff00ff00[BoneyWorldBosses]|r Scout mode |cffff0000DISABLED|r - Combat logging OFF")
+        elseif setting == "report" then
+            local reportArg = args[3]
+            if reportArg == "off" then
+                -- Scout report OFF
+                db.scoutReport = {
+                    action = "off",
+                    characterName = UnitName("player"),
+                    timestamp = time(),
+                }
+                db.scoutingActive = false
+                print("|cff00ff00[BoneyWorldBosses]|r Stopping scout report, reloading...")
+                ReloadUI()
+            else
+                -- Scout report ON
+                local bossKey, zoneName = GetPlayerZoneBoss()
+                if not bossKey then
+                    local zoneMsg = zoneName and (" (current zone: " .. zoneName .. ")") or ""
+                    print("|cffff0000[BoneyWorldBosses]|r Not in a boss zone" .. zoneMsg)
+                    print("|cffff0000[BoneyWorldBosses]|r Must be in Hellfire Peninsula or Shadowmoon Valley")
+                    return
+                end
+                local layer, layerId = GetCurrentLayerInfo()
+                local displayName = BOSS_DISPLAY_NAMES[bossKey]
+                db.scoutReport = {
+                    action = "on",
+                    boss = bossKey,
+                    layer = layer,
+                    layerId = layerId,
+                    characterName = UnitName("player"),
+                    timestamp = time(),
+                }
+                db.scoutingActive = true
+                StaticPopup_Show("WBA_CONFIRM_SCOUT_REPORT", displayName, layer)
+            end
         else
-            print("|cff00ff00[BoneyWorldBosses]|r Usage: /bwb scout on/off")
+            print("|cff00ff00[BoneyWorldBosses]|r Usage:")
+            print("  /bwb scout on|off     - Toggle combat logging")
+            print("  /bwb scout report     - Start scouting (zone auto-detected)")
+            print("  /bwb scout report off - Stop scouting")
         end
 
     elseif cmd == "reporter" then
@@ -685,7 +828,9 @@ local function SlashHandler(msg)
         print("  Scout (combat logging): " .. scoutStatus)
         print("  Reporter (kill reports): " .. reporterStatus)
         print("  Combat logging: " .. loggingStatus .. " (required for Scout/Test)")
+        local scoutingReportStatus = db.scoutingActive and "|cff00ff00ACTIVE|r" or "off"
         print("  Test kill mode: " .. testStatus)
+        print("  Scouting report: " .. scoutingReportStatus)
         print("  Pending kills: " .. #db.pendingKills)
         print("  Log file: WoW/_anniversary_/Logs/WoWCombatLog.txt")
 
@@ -982,13 +1127,15 @@ local function SlashHandler(msg)
 
     else
         print("|cff00ff00[BoneyWorldBosses]|r v" .. VERSION .. " - Boney World Bosses")
-        print("  /bwb scout on|off    - Toggle Scout mode (combat logging)")
-        print("  /bwb reporter on|off - Toggle Reporter mode (kill reports)")
-        print("  /bwb status          - Show current status")
-        print("  /bwb log             - Kill report management (status/clear/update)")
-        print("  /bwb options         - Open settings panel")
-        print("  /bwb test kill       - Test mode (next creature kill = test report)")
-        print("  /bwb layers          - Send layer update to Discord (reloads UI)")
+        print("  /bwb scout on|off     - Toggle Scout mode (combat logging)")
+        print("  /bwb scout report     - Start scouting boss zone (reloads UI)")
+        print("  /bwb scout report off - Stop scouting (reloads UI)")
+        print("  /bwb reporter on|off  - Toggle Reporter mode (kill reports)")
+        print("  /bwb status           - Show current status")
+        print("  /bwb log              - Kill report management (status/clear/update)")
+        print("  /bwb options          - Open settings panel")
+        print("  /bwb test kill        - Test mode (next creature kill = test report)")
+        print("  /bwb layers           - Send layer update to Discord (reloads UI)")
         print("")
         print("  Log commands:")
         print("    /bwb log status    - Show all kill reports with status")
@@ -1014,5 +1161,14 @@ frame:SetScript("OnEvent", function(self, event, ...)
         OnCombatLogEvent()
     elseif event == "PLAYER_LOGOUT" then
         WriteLayerSnapshot("logout")
+        -- Auto scout-off on logout
+        if db and db.scoutingActive then
+            db.scoutReport = {
+                action = "off",
+                characterName = UnitName("player"),
+                timestamp = time(),
+            }
+            db.scoutingActive = false
+        end
     end
 end)
