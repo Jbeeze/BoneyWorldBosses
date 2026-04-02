@@ -395,7 +395,7 @@ local isLoggingEnabled = false
 local testKillModeActive = false
 
 -- Flag to distinguish scout ReloadUI from real logout (not persisted)
-local reloadingForScout = false
+local intentionalReload = false
 
 -- =============================================================================
 -- KILL DETECTION
@@ -500,6 +500,7 @@ StaticPopupDialogs["WBA_CONFIRM_KILL_REPORT"] = {
     button2 = "Cancel",
     OnAccept = function()
         print("|cff00ff00[BoneyWorldBosses]|r Reloading UI to flush kill report...")
+        intentionalReload = true
         ReloadUI()
     end,
     OnCancel = function()
@@ -518,6 +519,7 @@ StaticPopupDialogs["WBA_CONFIRM_LAYER_SNAPSHOT"] = {
     OnAccept = function()
         if WriteLayerSnapshot("manual") then
             print("|cff00ff00[BoneyWorldBosses]|r Reloading UI to flush layer snapshot...")
+            intentionalReload = true
             ReloadUI()
         end
     end,
@@ -536,7 +538,7 @@ StaticPopupDialogs["WBA_CONFIRM_SCOUT_ON"] = {
     button2 = "Cancel",
     OnAccept = function()
         print("|cff00ff00[BoneyWorldBosses]|r Reloading UI to send scout report...")
-        reloadingForScout = true
+        intentionalReload = true
         ReloadUI()
     end,
     OnCancel = function()
@@ -558,7 +560,7 @@ StaticPopupDialogs["WBA_CONFIRM_SCOUT_OFF"] = {
     button2 = "Cancel",
     OnAccept = function()
         print("|cff00ff00[BoneyWorldBosses]|r Reloading UI to send scout-off report...")
-        reloadingForScout = true
+        intentionalReload = true
         ReloadUI()
     end,
     OnCancel = function()
@@ -1207,7 +1209,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
         -- e.g. a scout-on that triggered this ReloadUI)
         -- NOTE: Do NOT call C_Map or other world APIs here — they can error during
         -- PLAYER_LOGOUT and abort the handler. Use only persisted context data.
-        if db and db.scoutingActive and not reloadingForScout then
+        if db and db.scoutingActive and not intentionalReload then
             local ctx = db.scoutingContext or {}
             db.scoutReport = {
                 action = "off",
