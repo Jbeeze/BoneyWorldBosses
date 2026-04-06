@@ -564,6 +564,7 @@ def post_kill_report(kill: dict) -> bool:
         "alertType": "BOSS_KILLED",
         "boss": boss_key,
         "time": kill.get("time", "?"),
+        "date": kill.get("date", ""),
         "layer": kill.get("layer", "?"),
         "layerId": kill.get("layerId", "?"),
         "msg": f"{boss_name} was killed!",

@@ -112,6 +112,12 @@ local function FormatTimeServerTime()
     return string.format("%d:%02d%s", hour, minute, ampm)
 end
 
+-- Format current date as "YYYY-MM-DD"
+local function FormatDateServerTime()
+    local dateInfo = C_DateAndTime.GetCurrentCalendarTime()
+    return string.format("%04d-%02d-%02d", dateInfo.year, dateInfo.month, dateInfo.monthDay)
+end
+
 -- Get the NWB addon reference (must be defined before GetCurrentLayer)
 local function GetNWB()
     return LibStub("AceAddon-3.0"):GetAddon("NovaWorldBuffs", true)
@@ -442,6 +448,7 @@ local function OnUnitDied(destGuid, destName)
     end
 
     local killTime = FormatTimeServerTime()
+    local killDate = FormatDateServerTime()
     local layerId = ExtractLayerIdFromGuid(destGuid) or "?"
     local layer = GetCurrentLayer(layerId)
     local timestamp = time()
@@ -450,6 +457,7 @@ local function OnUnitDied(destGuid, destName)
     local killRecord = {
         boss = bossKey,
         time = killTime,
+        date = killDate,
         layer = layer,
         layerId = layerId,
         timestamp = timestamp,
