@@ -26,8 +26,8 @@ import requests
 CONFIG = {
     # Bot API URL (your WorldBossTracker bot)
     # Local: http://localhost:3000
-    # Render: https://worldbosstrackerdiscordbot.onrender.com
-    "BOT_API_URL": "https://worldbosstrackerdiscordbot.onrender.com",
+    # Render: https://worldbosstrackerdiscordbot-kkv8.onrender.com
+    "BOT_API_URL": "https://worldbosstrackerdiscordbot-kkv8.onrender.com",
 
     # Discord guild/server ID (required)
     # e.g. "GUILD_ID": "1234567890123456789",
