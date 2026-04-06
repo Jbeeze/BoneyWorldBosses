@@ -59,6 +59,10 @@ STATE_FILE = SCRIPT_DIR / "bridge_state.json"
 # Cached character name (read from SavedVariables)
 _cached_character_name = ""
 
+# Cached layer zones for instance ID → layer number lookup
+# Format: { "map_id": { "layer_num": "instance_id" } }
+_cached_layer_zones: dict = {}
+
 
 def auto_detect_logs_dir() -> str:
     """
@@ -128,6 +132,21 @@ def extract_npc_id_from_guid(guid: str) -> str | None:
     return None
 
 
+def extract_instance_id_from_guid(guid: str) -> str | None:
+    """
+    Extract instance ID from a creature GUID.
+    GUID format: Creature-0-server-zone-instance-NPCID-spawn
+    Returns: instance ID string or None (index 4, 0-based)
+    """
+    if not guid or not guid.startswith("Creature-"):
+        return None
+
+    parts = guid.split("-")
+    if len(parts) >= 5:
+        return parts[4]
+    return None
+
+
 def parse_combat_line(line: str) -> dict | None:
     """
     Parse a combat log line and return structured data if it contains a boss.
@@ -170,6 +189,7 @@ def parse_combat_line(line: str) -> dict | None:
             "npc_id": npc_id,
             "event": event_type,
             "source_name": source_name,
+            "instance_id": extract_instance_id_from_guid(source_guid) or "",
         }
 
     # Also check dest GUID for damage events (player attacking boss)
@@ -184,6 +204,7 @@ def parse_combat_line(line: str) -> dict | None:
                 "npc_id": npc_id,
                 "event": event_type,
                 "source_name": dest_name,
+                "instance_id": extract_instance_id_from_guid(dest_guid) or "",
             }
 
     return None
@@ -192,6 +213,17 @@ def parse_combat_line(line: str) -> dict | None:
 # =============================================================================
 # DEDUPLICATION
 # =============================================================================
+
+def resolve_layer_from_instance_id(instance_id: str) -> str:
+    """Resolve an instance ID to a layer number using cached layer snapshot data."""
+    if not instance_id or not _cached_layer_zones:
+        return "?"
+    for map_id, layers in _cached_layer_zones.items():
+        for layer_num, inst_id in layers.items():
+            if inst_id == instance_id:
+                return layer_num
+    return "?"
+
 
 # Track last alert time per boss to avoid spam
 _last_alert_times: dict[str, float] = {}
@@ -771,6 +803,11 @@ def check_layer_snapshot(state: dict, verbose: bool = False) -> None:
                 print("[LAYER] No layer snapshot found in SavedVariables")
             return
 
+        # Always cache zones for instance ID → layer number lookup in combat detection
+        global _cached_layer_zones
+        if snapshot["zones"]:
+            _cached_layer_zones = snapshot["zones"]
+
         last_ts = state.get("last_layer_timestamp", 0)
         if snapshot["timestamp"] <= last_ts:
             if verbose:
@@ -1112,7 +1149,10 @@ def process_line(line: str) -> None:
     if not should_alert(boss_name):
         return
 
-    print(f"[ALERT] COMBAT_DETECTED: {boss_name} (NPC {result['npc_id']}) - {result['event']}")
+    instance_id = result.get("instance_id", "")
+    layer = resolve_layer_from_instance_id(instance_id)
+
+    print(f"[ALERT] COMBAT_DETECTED: {boss_name} (NPC {result['npc_id']}) - {result['event']} - Layer {layer} ({instance_id})")
 
     alert = {
         "alertType": "COMBAT_DETECTED",
@@ -1122,6 +1162,8 @@ def process_line(line: str) -> None:
         "msg": f"{boss_name} detected in combat!",
         "channel": "combat_log",
         "characterName": _cached_character_name,
+        "layer": layer,
+        "layerId": instance_id,
     }
     post_to_bot(alert)
 
