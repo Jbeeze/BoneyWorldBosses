@@ -54,6 +54,9 @@ local DB_DEFAULTS = {
     scoutingContext = nil,
     -- scoutingContext format (saved when scout-on is sent, used for scout-off):
     -- { boss = "doomwalker", layer = "3", layerId = "11640" }
+    calloutReport = nil,
+    -- calloutReport format:
+    -- { boss = "kazzak", layer = "2", layerId = "31401", characterName = "Name", timestamp = 1711043445 }
 }
 
 -- Reference to saved variables (set on ADDON_LOADED)
@@ -562,6 +565,27 @@ StaticPopupDialogs["WBA_CONFIRM_SCOUT_ON"] = {
     preferredIndex = 3,
 }
 
+StaticPopupDialogs["WBA_CONFIRM_CALLOUT"] = {
+    text = "Boss Callout\n\nThis will post an @everyone callout for %s L%s.\nPlayers will be told to whisper %s for invite.\n\n|cffff8800Warning:|r This will reload your UI.",
+    button1 = "Send Callout",
+    button2 = "Cancel",
+    OnAccept = function()
+        print("|cff00ff00[BoneyWorldBosses]|r Reloading UI to send callout...")
+        intentionalReload = true
+        ReloadUI()
+    end,
+    OnCancel = function()
+        print("|cff00ff00[BoneyWorldBosses]|r Callout cancelled.")
+        if db then
+            db.calloutReport = nil
+        end
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
 StaticPopupDialogs["WBA_CONFIRM_SCOUT_OFF"] = {
     text = "Stop Scouting\n\n%s on Layer %s\n\n|cffff8800Warning:|r This will reload your UI",
     button1 = "Stop Scouting",
@@ -841,6 +865,31 @@ local function SlashHandler(msg)
         else
             print("|cff00ff00[BoneyWorldBosses]|r Usage: /bwb scout on|off")
         end
+
+    elseif cmd == "callout" then
+        -- Validate zone before doing anything
+        local bossKey, zoneName = GetPlayerZoneBoss()
+        if not bossKey then
+            local zoneMsg = zoneName and (" (current zone: " .. zoneName .. ")") or ""
+            print("|cffff0000[BoneyWorldBosses]|r Not in a boss zone" .. zoneMsg)
+            print("|cffff0000[BoneyWorldBosses]|r Must be in Hellfire Peninsula or Shadowmoon Valley to callout")
+            return
+        end
+        local layer, layerId = GetCurrentLayerInfo()
+        if layer == "?" or layerId == "?" then
+            print("|cffff0000[BoneyWorldBosses]|r Layer not detected. Hover over an NPC and wait a few seconds, then try again.")
+            return
+        end
+        local displayName = BOSS_DISPLAY_NAMES[bossKey]
+        local characterName = UnitName("player")
+        db.calloutReport = {
+            boss = bossKey,
+            layer = layer,
+            layerId = layerId,
+            characterName = characterName,
+            timestamp = time(),
+        }
+        StaticPopup_Show("WBA_CONFIRM_CALLOUT", displayName, layer, characterName)
 
     elseif cmd == "reporter" then
         local setting = args[2]
