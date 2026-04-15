@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 import requests
@@ -213,6 +214,22 @@ def parse_combat_line(line: str) -> dict | None:
 # =============================================================================
 # DEDUPLICATION
 # =============================================================================
+
+def format_timestamp(unix_ts: int | float) -> tuple[str, str]:
+    """Convert a Unix timestamp to (time_str, date_str) e.g. ('1:39pm', '2026-04-15')."""
+    dt = datetime.fromtimestamp(unix_ts)
+    hour = dt.hour
+    ampm = "am"
+    if hour >= 12:
+        ampm = "pm"
+        if hour > 12:
+            hour -= 12
+    elif hour == 0:
+        hour = 12
+    time_str = f"{hour}:{dt.minute:02d}{ampm}"
+    date_str = dt.strftime("%Y-%m-%d")
+    return time_str, date_str
+
 
 def resolve_layer_from_instance_id(instance_id: str) -> str:
     """Resolve an instance ID to a layer number using cached layer snapshot data."""
@@ -830,11 +847,15 @@ def check_layer_snapshot(state: dict, verbose: bool = False) -> None:
             layer_list = ", ".join(f"L{num}={inst}" for num, inst in sorted(layers.items()))
             print(f"[LAYER]   Zone {map_id}: {layer_list}")
 
+        snap_time, snap_date = format_timestamp(snapshot["timestamp"])
+
         alert = {
             "alertType": "LAYER_UPDATE",
             "trigger": trigger,
             "zones": zones,
             "characterName": snapshot.get("characterName", ""),
+            "time": snap_time,
+            "date": snap_date,
         }
 
         print(f"[LAYER] Sending payload: {json.dumps(alert, indent=2)}")
@@ -957,6 +978,8 @@ def check_scout_report(state: dict, verbose: bool = False) -> None:
         else:
             print(f"[SCOUT] Scout off report from {character_name} ({boss_name} L{layer})")
 
+        scout_time, scout_date = format_timestamp(report["timestamp"])
+
         alert = {
             "alertType": "SCOUT_REPORT",
             "action": action,
@@ -964,6 +987,8 @@ def check_scout_report(state: dict, verbose: bool = False) -> None:
             "layer": layer,
             "layerId": layer_id,
             "characterName": character_name,
+            "time": scout_time,
+            "date": scout_date,
         }
 
         if post_to_bot(alert):
@@ -1154,6 +1179,8 @@ def process_line(line: str) -> None:
 
     print(f"[ALERT] COMBAT_DETECTED: {boss_name} (NPC {result['npc_id']}) - {result['event']} - Layer {layer} ({instance_id})")
 
+    now_time, now_date = format_timestamp(time.time())
+
     alert = {
         "alertType": "COMBAT_DETECTED",
         "boss": boss_name,
@@ -1164,6 +1191,8 @@ def process_line(line: str) -> None:
         "characterName": _cached_character_name,
         "layer": layer,
         "layerId": instance_id,
+        "time": now_time,
+        "date": now_date,
     }
     post_to_bot(alert)
 
