@@ -776,12 +776,7 @@ local function SlashHandler(msg)
     if cmd == "scout" then
         local setting = args[2]
         if setting == "on" then
-            -- Enable combat logging
-            db.config.scoutEnabled = true
-            LoggingCombat(true)
-            isLoggingEnabled = true
-            print("|cff00ff00[BoneyWorldBosses]|r Scout mode |cff00ff00ENABLED|r - Combat logging ON")
-            -- Send scout report to Discord
+            -- Validate zone before enabling anything
             local bossKey, zoneName = GetPlayerZoneBoss()
             if not bossKey then
                 local zoneMsg = zoneName and (" (current zone: " .. zoneName .. ")") or ""
@@ -794,6 +789,11 @@ local function SlashHandler(msg)
                 print("|cffff0000[BoneyWorldBosses]|r Layer not detected. Hover over an NPC and wait a few seconds, then try again.")
                 return
             end
+            -- Enable combat logging
+            db.config.scoutEnabled = true
+            LoggingCombat(true)
+            isLoggingEnabled = true
+            print("|cff00ff00[BoneyWorldBosses]|r Scout mode |cff00ff00ENABLED|r - Combat logging ON")
             local displayName = BOSS_DISPLAY_NAMES[bossKey]
             db.scoutReport = {
                 action = "on",
