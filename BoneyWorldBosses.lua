@@ -6,7 +6,7 @@
 --   Layer Updates: NWB layer data reporting to Discord
 
 local ADDON_NAME = "BoneyWorldBosses"
-local VERSION = "3.3.0"
+local VERSION = "3.3.4"
 
 -- Create AceAddon (NWB bundles LibStub + AceAddon-3.0)
 local BWB = LibStub("AceAddon-3.0"):NewAddon(ADDON_NAME)
@@ -566,7 +566,7 @@ StaticPopupDialogs["WBA_CONFIRM_SCOUT_ON"] = {
 }
 
 StaticPopupDialogs["WBA_CONFIRM_CALLOUT"] = {
-    text = "Boss Callout\n\nThis will post an @everyone callout for %s L%s.\nPlayers will be told to whisper %s for invite.\n\n|cffff8800Warning:|r This will reload your UI.",
+    text = "Boss Callout\n\nThis will post an @everyone callout for %s L%s.\nPlayers will be told to whisper you for invite.\n\n|cffff8800Warning:|r This will reload your UI.",
     button1 = "Send Callout",
     button2 = "Cancel",
     OnAccept = function()
@@ -889,7 +889,7 @@ local function SlashHandler(msg)
             characterName = characterName,
             timestamp = time(),
         }
-        StaticPopup_Show("WBA_CONFIRM_CALLOUT", displayName, layer, characterName)
+        StaticPopup_Show("WBA_CONFIRM_CALLOUT", displayName, layer)
 
     elseif cmd == "reporter" then
         local setting = args[2]
@@ -1237,6 +1237,7 @@ local function SlashHandler(msg)
         print("  /bwb options          - Open settings panel")
         print("  /bwb test kill        - Test mode (next creature kill = test report)")
         print("  /bwb layers           - Send layer update to Discord (reloads UI)")
+        print("  /bwb callout          - Post @everyone boss callout to Discord (reloads UI)")
         print("")
         print("  Log commands:")
         print("    /bwb log status    - Show all kill reports with status")
