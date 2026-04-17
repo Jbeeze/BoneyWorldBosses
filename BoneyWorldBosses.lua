@@ -695,8 +695,14 @@ local function CreateOptionsPanel()
         pendingCount:SetText(count .. " pending kill" .. (count ~= 1 and "s" or ""))
     end
 
-    -- Register with Interface Options
-    InterfaceOptions_AddCategory(panel)
+    -- Register with Interface Options (modern Settings API, fallback to legacy)
+    if Settings and Settings.RegisterCanvasLayoutCategory then
+        local category = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
+        category.ID = panel.name
+        Settings.RegisterAddOnCategory(category)
+    elseif InterfaceOptions_AddCategory then
+        InterfaceOptions_AddCategory(panel)
+    end
 
     return panel
 end
@@ -1262,7 +1268,12 @@ frame:SetScript("OnEvent", function(self, event, ...)
     if event == "COMBAT_LOG_EVENT_UNFILTERED" then
         OnCombatLogEvent()
     elseif event == "PLAYER_LOGOUT" then
-        WriteLayerSnapshot("logout")
+        -- Only write the "logout" snapshot on a real logout. Intentional reloads
+        -- (scout on/off, /bwb layers, /bwb callout, kill-report popup) would
+        -- otherwise clobber a trigger="manual" snapshot with trigger="logout".
+        if not intentionalReload then
+            WriteLayerSnapshot("logout")
+        end
         -- Auto scout-off on logout/exit (skip if there's already a pending report,
         -- e.g. a scout-on that triggered this ReloadUI)
         -- NOTE: Do NOT call C_Map or other world APIs here — they can error during
