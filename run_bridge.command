@@ -26,18 +26,8 @@ if ! python3 -c "import requests" &> /dev/null; then
     echo ""
 fi
 
-# Check if GUILD_ID is set
-if grep -q '"GUILD_ID": ""' bridge.py; then
-    echo "ERROR: GUILD_ID is not configured!"
-    echo ""
-    echo "Please edit bridge.py and set your Discord server ID."
-    echo "Right-click your server in Discord > Copy Server ID"
-    echo ""
-    read -p "Press Enter to exit..."
-    exit 1
-fi
-
-# Run the bridge
+# Run the bridge. Configuration is read from the addon's SavedVariables -
+# run /bwb setup in WoW if the bridge reports that config is missing.
 python3 bridge.py
 
 # Keep window open if bridge exits

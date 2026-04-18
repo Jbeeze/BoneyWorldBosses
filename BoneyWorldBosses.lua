@@ -6,7 +6,8 @@
 --   Layer Updates: NWB layer data reporting to Discord
 
 local ADDON_NAME = "BoneyWorldBosses"
-local VERSION = "3.3.4"
+local VERSION = "3.4.0"
+local SCHEMA_VERSION = 1
 
 -- Create AceAddon (NWB bundles LibStub + AceAddon-3.0)
 local BWB = LibStub("AceAddon-3.0"):NewAddon(ADDON_NAME)
@@ -40,6 +41,9 @@ local DB_DEFAULTS = {
     config = {
         scoutEnabled = true,    -- Combat log detection (existing)
         reporterEnabled = true, -- Kill reporting (new)
+        guildId = "",           -- Discord guild/server ID (set via /bwb setup)
+        discordId = "",         -- User's Discord ID (set via /bwb setup)
+        botApiUrl = "",         -- Bot API URL (set via /bwb setup)
     },
     pendingKills = {},
     -- pendingKills format:
@@ -96,6 +100,40 @@ local function ExtractLayerIdFromGuid(guid)
         return parts[5]  -- instance ID (layer ID)
     end
     return nil
+end
+
+-- Discord IDs (snowflakes) are 17-19 decimal digits.
+local function IsValidSnowflake(s)
+    return type(s) == "string" and s:match("^%d+$") ~= nil and #s >= 17 and #s <= 19
+end
+
+local function IsValidHttpsUrl(s)
+    return type(s) == "string" and s:match("^https://[%w%.%-_]+") ~= nil
+end
+
+local function IsConfigComplete(d)
+    if not d or not d.config then return false end
+    return IsValidSnowflake(d.config.guildId)
+        and IsValidSnowflake(d.config.discordId)
+        and IsValidHttpsUrl(d.config.botApiUrl)
+end
+
+-- Returns a comma-separated list of missing-or-invalid config field names.
+local function MissingConfigFields(d)
+    local missing = {}
+    if not d or not d.config then
+        return "guild id, discord id, bot api url"
+    end
+    if not IsValidSnowflake(d.config.guildId) then table.insert(missing, "guild id") end
+    if not IsValidSnowflake(d.config.discordId) then table.insert(missing, "discord id") end
+    if not IsValidHttpsUrl(d.config.botApiUrl) then table.insert(missing, "bot api url") end
+    return table.concat(missing, ", ")
+end
+
+-- Masks a Discord snowflake for display (first 3 + "..." + last 2 + digit count).
+local function MaskSnowflake(s)
+    if type(s) ~= "string" or #s < 6 then return s or "" end
+    return s:sub(1, 3) .. "..." .. s:sub(-2) .. " (" .. #s .. " digits)"
 end
 
 -- Format current time as "H:MMam/pm" (Server Time)
@@ -608,6 +646,99 @@ StaticPopupDialogs["WBA_CONFIRM_SCOUT_OFF"] = {
 }
 
 -- =============================================================================
+-- SETUP WIZARD
+-- =============================================================================
+
+-- Chained StaticPopup dialogs: Guild -> Discord -> Bot API URL -> ReloadUI.
+-- button1 is live-enabled via EditBoxOnTextChanged so invalid input can't be submitted.
+
+local function BuildSetupPopup(fieldLabel, validator, maxLetters, onAccept)
+    return {
+        text = fieldLabel,
+        button1 = "Next",
+        button2 = "Cancel",
+        hasEditBox = true,
+        maxLetters = maxLetters,
+        editBoxWidth = 260,
+        OnShow = function(self, data)
+            self.editBox:SetText(data or "")
+            self.editBox:HighlightText()
+            self.editBox:SetFocus()
+            if validator(self.editBox:GetText()) then
+                self.button1:Enable()
+            else
+                self.button1:Disable()
+            end
+        end,
+        EditBoxOnTextChanged = function(self)
+            local parent = self:GetParent()
+            if validator(self:GetText()) then
+                parent.button1:Enable()
+            else
+                parent.button1:Disable()
+            end
+        end,
+        EditBoxOnEnterPressed = function(self)
+            local parent = self:GetParent()
+            if parent.button1:IsEnabled() then
+                parent.button1:Click()
+            end
+        end,
+        EditBoxOnEscapePressed = function(self)
+            self:GetParent():Hide()
+        end,
+        OnAccept = function(self)
+            onAccept(self.editBox:GetText())
+        end,
+        OnCancel = function()
+            print("|cff00ff00[BoneyWorldBosses]|r Setup cancelled. Run |cffffff00/bwb setup|r to resume.")
+        end,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        preferredIndex = 3,
+    }
+end
+
+StaticPopupDialogs["WBA_SETUP_GUILD"] = BuildSetupPopup(
+    "Boney World Bosses Setup (1/3)\n\nEnter your Discord |cffffff00Guild ID|r (17-19 digit snowflake):",
+    IsValidSnowflake,
+    19,
+    function(value)
+        db.config.guildId = value
+        print("|cff00ff00[BoneyWorldBosses]|r Guild ID saved.")
+        StaticPopup_Show("WBA_SETUP_DISCORD", nil, nil, db.config.discordId)
+    end
+)
+
+StaticPopupDialogs["WBA_SETUP_DISCORD"] = BuildSetupPopup(
+    "Boney World Bosses Setup (2/3)\n\nEnter your personal |cffffff00Discord User ID|r (17-19 digit snowflake):",
+    IsValidSnowflake,
+    19,
+    function(value)
+        db.config.discordId = value
+        print("|cff00ff00[BoneyWorldBosses]|r Discord ID saved.")
+        StaticPopup_Show("WBA_SETUP_API", nil, nil, db.config.botApiUrl)
+    end
+)
+
+StaticPopupDialogs["WBA_SETUP_API"] = BuildSetupPopup(
+    "Boney World Bosses Setup (3/3)\n\nEnter your |cffffff00Bot API URL|r (must start with https://):",
+    IsValidHttpsUrl,
+    256,
+    function(value)
+        db.config.botApiUrl = value
+        print("|cff00ff00[BoneyWorldBosses]|r Bot API URL saved. Reloading UI so the bridge can pick up your config...")
+        intentionalReload = true
+        ReloadUI()
+    end
+)
+
+local function StartSetupWizard()
+    StaticPopup_Show("WBA_SETUP_GUILD", nil, nil, db.config.guildId)
+end
+
+-- =============================================================================
 -- INTERFACE OPTIONS PANEL
 -- =============================================================================
 
@@ -616,9 +747,15 @@ local function CreateOptionsPanel()
     local panel = CreateFrame("Frame")
     panel.name = "BoneyWorldBosses"
 
-    -- Title
+    -- Setup-incomplete banner (shown only when config is missing)
+    local banner = panel:CreateFontString("WBABanner", "ARTWORK", "GameFontNormal")
+    banner:SetPoint("TOPLEFT", 16, -16)
+    banner:SetJustifyH("LEFT")
+    banner:Hide()
+
+    -- Title (anchored to banner's height, leaving room when banner is visible)
     local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetPoint("TOPLEFT", 16, -40)
     title:SetText("Boney World Bosses v" .. VERSION)
 
     -- Description
@@ -693,6 +830,12 @@ local function CreateOptionsPanel()
         reporterCheckbox:SetChecked(db.config.reporterEnabled)
         local count = db.pendingKills and #db.pendingKills or 0
         pendingCount:SetText(count .. " pending kill" .. (count ~= 1 and "s" or ""))
+        if IsConfigComplete(db) then
+            banner:Hide()
+        else
+            banner:SetText("|cffff0000Setup incomplete:|r missing " .. MissingConfigFields(db) .. ". Run /bwb setup.")
+            banner:Show()
+        end
     end
 
     -- Register with Interface Options (modern Settings API, fallback to legacy)
@@ -742,10 +885,39 @@ local function InitializeSavedVariables()
     db = BoneyWorldBossesDB
 end
 
+-- Writes version + schema breadcrumb that the bridge forwards to the bot API.
+local function WriteMeta()
+    db.meta = {
+        addonVersion = VERSION,
+        schemaVersion = SCHEMA_VERSION,
+    }
+end
+
+-- Writes boss watch tables into SavedVariables so the bridge reads them from
+-- there instead of carrying hardcoded constants of its own. Stringified keys
+-- match the bridge's string NPC-id capture from GUIDs.
+local function WriteStaticWatchTables()
+    local watched = {}
+    for npcId, bossKey in pairs(BOSS_NPC_IDS) do
+        watched[tostring(npcId)] = bossKey
+    end
+    db.watchedNpcIds = watched
+
+    local names = {}
+    for bossKey, displayName in pairs(BOSS_DISPLAY_NAMES) do
+        names[bossKey] = displayName
+    end
+    db.bossDisplayNames = names
+end
+
 -- AceAddon callback: called at ADDON_LOADED time
 function BWB:OnInitialize()
     -- Initialize saved variables
     InitializeSavedVariables()
+
+    -- Publish version + watch tables for the external bridge to consume.
+    WriteMeta()
+    WriteStaticWatchTables()
 
     -- Create options panel
     optionsPanel = CreateOptionsPanel()
@@ -785,6 +957,12 @@ function BWB:OnEnable()
 
     print("|cff00ff00[BoneyWorldBosses]|r Type /bwb for commands. ESC > Interface > AddOns for settings.")
 
+    -- Nag until setup is complete. Missing config means the bridge cannot reach
+    -- Discord at all, so this is worth repeating on every login.
+    if not IsConfigComplete(db) then
+        print("|cffff0000[BoneyWorldBosses] Not configured.|r Run |cffffff00/bwb setup|r to enter Discord IDs and bot URL.")
+    end
+
     -- Send layer snapshot on login (NWB.data is now guaranteed available)
     C_Timer.After(5, function()
         WriteLayerSnapshot("login")
@@ -797,8 +975,10 @@ end
 
 local function SlashHandler(msg)
     local args = {}
+    local rawArgs = {}
     for word in string.gmatch(msg, "%S+") do
         table.insert(args, string.lower(word))
+        table.insert(rawArgs, word)
     end
 
     local cmd = args[1]
@@ -942,6 +1122,16 @@ local function SlashHandler(msg)
         print("  Scouting report: " .. scoutingReportStatus)
         print("  Pending kills: " .. #db.pendingKills)
         print("  Log file: WoW/_anniversary_/Logs/WoWCombatLog.txt")
+        print("|cff00ff00[BoneyWorldBosses]|r Bridge config:")
+        local guildDisplay = IsValidSnowflake(db.config.guildId) and MaskSnowflake(db.config.guildId) or "|cffff0000not set|r"
+        local discordDisplay = IsValidSnowflake(db.config.discordId) and MaskSnowflake(db.config.discordId) or "|cffff0000not set|r"
+        local apiDisplay = IsValidHttpsUrl(db.config.botApiUrl) and db.config.botApiUrl or "|cffff0000not set|r"
+        print("  Guild ID: " .. guildDisplay)
+        print("  Discord ID: " .. discordDisplay)
+        print("  Bot API URL: " .. apiDisplay)
+        if not IsConfigComplete(db) then
+            print("|cffffcc00[BoneyWorldBosses]|r Run |cffffff00/bwb setup|r to complete configuration.")
+        end
 
     elseif cmd == "pending" then
         -- Legacy alias for /bwb log status
@@ -1117,6 +1307,48 @@ local function SlashHandler(msg)
         InterfaceOptionsFrame_OpenToCategory("BoneyWorldBosses")
         InterfaceOptionsFrame_OpenToCategory("BoneyWorldBosses")  -- Called twice due to WoW bug
 
+    elseif cmd == "setup" then
+        StartSetupWizard()
+
+    elseif cmd == "guild" then
+        local value = rawArgs[2]
+        if not value then
+            print("|cff00ff00[BoneyWorldBosses]|r Usage: /bwb guild <17-19 digit Discord guild id>")
+            return
+        end
+        if not IsValidSnowflake(value) then
+            print("|cffff0000[BoneyWorldBosses]|r Invalid guild id. Expected 17-19 digit snowflake.")
+            return
+        end
+        db.config.guildId = value
+        print("|cff00ff00[BoneyWorldBosses]|r Guild ID saved. Run |cffffff00/reload|r for the bridge to pick up this change.")
+
+    elseif cmd == "discord" then
+        local value = rawArgs[2]
+        if not value then
+            print("|cff00ff00[BoneyWorldBosses]|r Usage: /bwb discord <17-19 digit Discord user id>")
+            return
+        end
+        if not IsValidSnowflake(value) then
+            print("|cffff0000[BoneyWorldBosses]|r Invalid discord id. Expected 17-19 digit snowflake.")
+            return
+        end
+        db.config.discordId = value
+        print("|cff00ff00[BoneyWorldBosses]|r Discord ID saved. Run |cffffff00/reload|r for the bridge to pick up this change.")
+
+    elseif cmd == "api" then
+        local value = rawArgs[2]
+        if not value then
+            print("|cff00ff00[BoneyWorldBosses]|r Usage: /bwb api <https://your-bot-url>")
+            return
+        end
+        if not IsValidHttpsUrl(value) then
+            print("|cffff0000[BoneyWorldBosses]|r Invalid url. Must start with https://")
+            return
+        end
+        db.config.botApiUrl = value
+        print("|cff00ff00[BoneyWorldBosses]|r Bot API URL saved. Run |cffffff00/reload|r for the bridge to pick up this change.")
+
     elseif cmd == "nwb" then
         -- Debug: show NWB layer info
         local nwb = GetNWB()
@@ -1236,9 +1468,13 @@ local function SlashHandler(msg)
 
     else
         print("|cff00ff00[BoneyWorldBosses]|r v" .. VERSION .. " - Boney World Bosses")
+        print("  /bwb setup            - Configure Discord IDs and Bot API URL (guided)")
+        print("  /bwb guild <id>       - Set Discord guild id (17-19 digits)")
+        print("  /bwb discord <id>     - Set your Discord user id (17-19 digits)")
+        print("  /bwb api <url>        - Set Bot API URL (https://...)")
         print("  /bwb scout on|off     - Toggle scouting (combat log + Discord report)")
         print("  /bwb reporter on|off  - Toggle Reporter mode (kill reports)")
-        print("  /bwb status           - Show current status")
+        print("  /bwb status           - Show current status and config")
         print("  /bwb log              - Kill report management (status/clear/update)")
         print("  /bwb options          - Open settings panel")
         print("  /bwb test kill        - Test mode (next creature kill = test report)")

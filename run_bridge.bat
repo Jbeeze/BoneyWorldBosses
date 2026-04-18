@@ -28,19 +28,8 @@ if errorlevel 1 (
     echo.
 )
 
-REM Check if GUILD_ID is set
-findstr /C:"GUILD_ID" bridge.py | findstr /C:": \"\"," >nul 2>&1
-if not errorlevel 1 (
-    echo ERROR: GUILD_ID is not configured!
-    echo.
-    echo Please edit bridge.py and set your Discord server ID.
-    echo Right-click your server in Discord ^> Copy Server ID
-    echo.
-    pause
-    exit /b 1
-)
-
-REM Run the bridge
+REM Run the bridge. Configuration is read from the addon's SavedVariables -
+REM run /bwb setup in WoW if the bridge reports that config is missing.
 python bridge.py
 
 REM Keep window open if bridge exits

@@ -1,148 +1,94 @@
 # Boney World Bosses
 
-A WoW Classic addon + companion app that automatically detects world boss activity (Kazzak and Doomwalker) and reports it to your Discord server. When you're near a boss fight, it picks up the action from your combat log and sends an alert to Discord within seconds. It can also report boss kills with layer and timing info, and keep your server updated on active layers.
+A WoW Classic addon + companion bridge that automatically detects world boss activity (Kazzak and Doomwalker) and reports it to your Discord server. When you're near a boss fight, it picks up the action from your combat log and sends an alert to Discord within seconds. It can also report boss kills with layer and timing info, and keep your server updated on active layers.
 
 Works with the [WorldBossTracker Discord bot](https://github.com/Jbeeze/WorldBossTrackerDiscordBot).
 
----
-
-## Installation
-
-### Step 1: Install the WoW Addon
-
-Download or clone this repo into your WoW AddOns folder:
-
-```
-World of Warcraft/_anniversary_/Interface/AddOns/BoneyWorldBosses/
-```
-
-You should end up with these files inside that folder:
-- `BoneyWorldBosses.toc`
-- `BoneyWorldBosses.lua`
-
-### Step 2: Install Python
-
-The bridge is a small Python script that runs on your computer alongside WoW. You need Python 3 installed.
-
-- Download from [python.org](https://www.python.org/downloads/)
-- **Windows users**: make sure to check **"Add Python to PATH"** during installation
-
-### Step 3: Set Your Discord Server ID
-
-Open `bridge.py` in any text editor (Notepad, TextEdit, etc.) and find this section near the top:
-
-```python
-# Discord guild/server ID (required)
-# e.g. "GUILD_ID": "1234567890123456789",
-"GUILD_ID": "",
-```
-
-Replace the empty quotes with your Discord server ID:
-
-1. Open Discord
-2. Right-click your server name in the sidebar
-3. Click **Copy Server ID** (if you don't see this, go to Settings > Advanced > turn on **Developer Mode**)
-4. Paste the ID between the quotes
-
-It should look like:
-```python
-"GUILD_ID": "1234567890123456789",
-```
-
-Save the file.
-
-### Step 4: Create a Desktop Shortcut
-
-The repo includes launcher files you can double-click to start the bridge:
-
-**macOS:**
-1. Find `run_bridge.command` in the addon folder
-2. Right-click it and drag to your Desktop, then choose **Make Alias** (or Option-drag to copy)
-3. If macOS blocks it the first time: right-click > **Open**, then click **Open** in the dialog
-
-**Windows:**
-1. Find `run_bridge.bat` in the addon folder
-2. Right-click it > **Send to** > **Desktop (create shortcut)**
-
-### Step 5: Run the Bridge
-
-Double-click the shortcut you just created. A terminal window will open showing the bridge status. It will:
-- Automatically install the `requests` package if needed
-- Auto-detect your WoW Logs folder
-- Start watching for boss activity
-
-The bridge needs to stay running while you play. Just leave the terminal window open in the background.
-
-> **Note**: If the bridge can't find your Logs folder automatically, open `bridge.py` and set `LOGS_DIR` to the path manually (e.g., `C:/Program Files/World of Warcraft/_anniversary_/Logs`).
+> **Architecture.** The addon ships via CurseForge (pure Lua) and stores all user config in WoW's SavedVariables. A small Python companion bridge reads those SavedVariables and forwards events to your Discord bot. The bridge is distributed separately via GitHub Releases — CurseForge rules forbid shipping executables inside an addon.
 
 ---
 
-## In-Game Setup
+## Install the addon
 
-### Enable Advanced Combat Logging
+**CurseForge:** search for *Boney World Bosses* and install. Done.
 
-This is required for the addon to detect boss fights. You only need to do this once:
+**Manual:** copy `BoneyWorldBosses.toc` and `BoneyWorldBosses.lua` into
+`World of Warcraft/_anniversary_/Interface/AddOns/BoneyWorldBosses/`.
 
-1. Open WoW and log into a character
-2. Press **Escape** > **System** > **Network**
-3. Check **Advanced Combat Logging**
+## Install the bridge
 
-### Start Combat Logging
+Grab the companion bridge for your OS from [GitHub Releases](https://github.com/Jbeeze/WorldBossAnnouncerAddon/releases):
 
-Type `/combatlog` in the chat window. You should see:
+- **Windows:** `bridge.exe` — double-click to run.
+- **macOS:** `bridge` (Unix executable). First launch: right-click → **Open** → **Open** to bypass Gatekeeper (we don't notarize). After that it runs normally.
+- **Python users:** `bridge.py` + `requirements.txt` — `pip install -r requirements.txt` then `python3 bridge.py`.
 
-> Combat being logged to Logs/WoWCombatLog.txt
+The bridge keeps a terminal window open while you play. Leave it running in the background.
 
-The addon's Scout mode does this automatically when you log in, but running it manually the first time ensures the log file is created.
+On first launch it auto-detects your WoW install (checks the common macOS and Windows paths); if that fails, it prompts you for the folder.
 
----
+## Configure in-game
 
-## Testing
+Run `/bwb setup` in WoW. A three-step wizard asks for:
 
-### Verify Everything Is Working
+1. **Discord Guild ID** (17–19 digit snowflake). Right-click your server in Discord → **Copy Server ID** (enable Developer Mode in Discord Settings → Advanced if you don't see the option).
+2. **Your Discord User ID** (17–19 digits). Right-click your name → **Copy User ID**.
+3. **Bot API URL** (starts with `https://`). Ask the person who runs your guild's WorldBossTracker bot.
 
-1. Make sure the bridge is running (double-click your shortcut)
-2. Log into WoW
-3. Type `/bwb status` to check the addon is active -- you should see Scout and Reporter both **enabled**
+The wizard reloads your UI on completion. The bridge picks up the new config on its next poll (~5 seconds).
 
-### Quick Test (No Boss Required)
+Prefer individual commands? `/bwb guild <id>`, `/bwb discord <id>`, `/bwb api <url>`. Each nags you to `/reload` afterward so the bridge sees the change.
 
-You can test the full reporting flow without finding an actual world boss:
+## Verify it works
 
-1. Type `/bwb test kill` in chat -- this arms test mode
-2. Kill any creature (a boar, a critter, anything)
-3. A popup appears with the test kill details
-4. Click **Report Kill** (this triggers a /reload)
-5. The bridge picks it up and sends a test alert to Discord (marked as a test)
+Run `/combatlog` in WoW once to start combat logging. Then:
 
-### Commands
+1. Make sure the bridge terminal window is open and reports `[KILL] Found SavedVariables`.
+2. `/bwb status` in WoW — all three config values should show (with Discord IDs masked).
+3. `/bwb test kill` → kill any creature → click **Report Kill** → your bot gets a test alert in Discord.
 
-| Command | What it does |
-|---------|-------------|
-| `/bwb` | Show help |
-| `/bwb status` | Check if Scout and Reporter modes are on |
-| `/bwb scout on` or `off` | Toggle real-time boss detection |
-| `/bwb reporter on` or `off` | Toggle kill reporting |
-| `/bwb layers` | Send current layer info to Discord |
-| `/bwb test kill` | Test mode -- next kill triggers a test report |
-| `/bwb log status` | See pending kill reports |
-| `/bwb options` | Open addon settings panel |
+## Slash commands
 
----
+| Command | Purpose |
+|---------|---------|
+| `/bwb setup` | Guided setup wizard |
+| `/bwb guild <id>` | Set Discord guild id |
+| `/bwb discord <id>` | Set your Discord user id |
+| `/bwb api <url>` | Set bot API URL |
+| `/bwb status` | Show config + mode status |
+| `/bwb scout on\|off` | Toggle real-time combat detection |
+| `/bwb reporter on\|off` | Toggle kill reporting |
+| `/bwb layers` | Send layer snapshot to Discord |
+| `/bwb callout` | Post `@everyone` boss callout |
+| `/bwb test kill` | Arm test mode (next kill = test report) |
+| `/bwb log status\|clear\|update` | Manage pending kill reports |
+| `/bwb options` | Open settings panel |
 
 ## Troubleshooting
 
-**Bridge says "GUILD_ID is not set"**
-Open `bridge.py` and add your Discord server ID (see Step 3 above).
+**Bridge prints `[WAIT] In-game setup not complete`**
+Run `/bwb setup` in WoW, then `/reload`. The bridge will pick up the config on its next poll. SavedVariables only flush on `/reload` or logout — that's a WoW engine limitation.
+
+**Bridge can't find your WoW install**
+It prompts for a path on first run. Paste the folder containing `Logs/` and `WTF/` (usually `_anniversary_` under your WoW install). The path is cached in `bridge_config.json` next to the bridge.
 
 **No alerts in Discord**
-- Is the bridge running? Check the terminal window for errors.
-- Is combat logging on? Type `/combatlog` in WoW.
-- Is Advanced Combat Logging enabled? Check Escape > System > Network.
-- Are you close enough? You need to be within ~50 yards of the boss fight.
+- Bridge terminal reports errors? Read them — they're usually explicit (e.g. "Bot API returned 401").
+- Combat logging on? Run `/combatlog` once.
+- Advanced Combat Logging enabled? **Esc → System → Network**.
+- Within ~50 yards of the boss fight? That's the combat-log range.
 
-**Bridge can't find the log file**
-Run `/combatlog` in WoW to create the file, then restart the bridge.
+**macOS says the binary is damaged / unverified**
+Right-click the `bridge` binary → **Open** → click **Open** in the dialog. macOS will remember your choice. We don't notarize builds.
 
-**"Python is not installed" error**
-Install Python 3 from [python.org](https://www.python.org/downloads/). Windows users: make sure "Add Python to PATH" is checked.
+---
+
+## For developers
+
+Lua addon code lives in `BoneyWorldBosses.lua`. Python bridge is `bridge.py`.
+
+The bridge is a **dumb forwarder** — it reads boss NPC IDs, display names, and user config from SavedVariables every ~5 seconds and passes opaque payloads (including the addon's `meta.addonVersion` / `meta.schemaVersion` breadcrumb) to the bot API. Adding a new boss is addon-only; bridge doesn't need updates.
+
+CurseForge packaging is controlled by `.pkgmeta` — everything except `.toc` / `.lua` / `README.md` is excluded from the shipped zip.
+
+Bridge releases are built via `.github/workflows/release-bridge.yml` on version tags. PyInstaller produces one-file binaries per platform.

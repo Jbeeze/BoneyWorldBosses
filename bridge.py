@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """
-Boney World Bosses - Discord Bridge v3.1
+Boney World Bosses - Discord Bridge v3.4
+Reads all user configuration (guild id, discord id, bot api url, watched NPC ids,
+boss display names) from the addon's SavedVariables file. No user-editable
+constants live in this script.
+
 Two detection modes:
-  - Scout: Tails WoWCombatLog for real-time Kazzak/Doomwalker combat detection
-  - Reporter: Reads SavedVariables for kill reports (requires /reload in-game)
+  - Scout: Tails WoWCombatLog for real-time combat detection of bosses the
+    addon tells us to watch.
+  - Reporter: Reads SavedVariables for kill reports (requires /reload in-game).
 
 Automatically finds the most recent combat log file.
 """
@@ -21,26 +26,14 @@ from pathlib import Path
 
 import requests
 
+BRIDGE_VERSION = "3.4.0"
+
 # =============================================================================
-# CONFIGURATION - Edit these values
+# OPERATIONAL CONFIG — not user-editable; user values live in SavedVariables.
 # =============================================================================
 CONFIG = {
-    # Bot API URL (your WorldBossTracker bot)
-    # Local: http://localhost:3000
-    # Render: https://worldbosstrackerdiscordbot-kkv8.onrender.com
-    "BOT_API_URL": "https://worldbosstrackerdiscordbot-kkv8.onrender.com",
-
-    # Discord guild/server ID (required)
-    # e.g. "GUILD_ID": "1234567890123456789",
-    "GUILD_ID": "",
-
-    # Your Discord user ID (for bot to match reports to your Discord account)
-    # e.g. "DISCORD_ID": "1234567890123456789",
-    "DISCORD_ID": "",
-
-    # Path to WoW Logs directory (NOT the specific file!)
-    # macOS: /Applications/World of Warcraft/_anniversary_/Logs
-    # Windows: C:/Program Files/World of Warcraft/_anniversary_/Logs
+    # Path to WoW Logs directory (NOT the specific file!). Auto-detected or
+    # cached in bridge_config.json; may also be asked interactively on first run.
     "LOGS_DIR": "",
 
     # Seconds between checking for new log lines
@@ -51,11 +44,21 @@ CONFIG = {
 
     # How often to check SavedVariables for kill reports (seconds)
     "KILL_REPORT_CHECK_INTERVAL": 5,
+
+    # How often to print the "waiting for in-game setup" message (seconds)
+    "WAIT_MESSAGE_INTERVAL": 30,
 }
 
-# State file path (same directory as this script)
-SCRIPT_DIR = Path(__file__).parent
+# Script directory. When bundled via PyInstaller --onefile, __file__ points at
+# a temp extraction dir — which would lose bridge_config.json on every run. Use
+# sys.executable instead so bridge_config.json sits next to the .exe/binary.
+if getattr(sys, "frozen", False):
+    SCRIPT_DIR = Path(sys.executable).parent
+else:
+    SCRIPT_DIR = Path(__file__).parent
+
 STATE_FILE = SCRIPT_DIR / "bridge_state.json"
+BRIDGE_CONFIG_FILE = SCRIPT_DIR / "bridge_config.json"
 
 # Cached character name (read from SavedVariables)
 _cached_character_name = ""
@@ -64,36 +67,120 @@ _cached_character_name = ""
 # Format: { "map_id": { "layer_num": "instance_id" } }
 _cached_layer_zones: dict = {}
 
+# User-owned config, read from addon SavedVariables every poll cycle.
+_runtime_config: dict = {
+    "guildId": "",
+    "discordId": "",
+    "botApiUrl": "",
+}
+
+# Boss watch tables, driven by the addon. Shape:
+#   _watched_npc_ids:     { "<npc_id>": "<boss_key>", ... }
+#   _boss_display_names:  { "<boss_key>": "<display name>", ... }
+_watched_npc_ids: dict = {}
+_boss_display_names: dict = {}
+
+# Meta breadcrumb (addon version / schema version) — forwarded as-is to bot.
+_cached_meta: dict = {}
+
+
+def read_bridge_config() -> dict:
+    """Load the bridge's operational config (currently just logsDir cache)."""
+    if BRIDGE_CONFIG_FILE.exists():
+        try:
+            with open(BRIDGE_CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            pass
+    return {}
+
+
+def write_bridge_config(cfg: dict) -> None:
+    try:
+        with open(BRIDGE_CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+    except IOError as e:
+        print(f"[WARN] Could not write {BRIDGE_CONFIG_FILE}: {e}")
+
+
+# Common WoW install roots to try when auto-detecting. Each path is
+# probed for a `Logs/` sibling — first match wins.
+_WOW_INSTALL_CANDIDATES = [
+    "/Applications/World of Warcraft/_anniversary_",
+    "/Applications/World of Warcraft/_classic_era_anniversary_",
+    "C:/Program Files/World of Warcraft/_anniversary_",
+    "C:/Program Files/World of Warcraft/_classic_era_anniversary_",
+    "C:/Program Files (x86)/World of Warcraft/_anniversary_",
+    "C:/Program Files (x86)/World of Warcraft/_classic_era_anniversary_",
+]
+
+
+def _logs_dir_in(root: Path) -> str:
+    logs = root / "Logs"
+    if logs.is_dir():
+        return str(logs)
+    return ""
+
 
 def auto_detect_logs_dir() -> str:
     """
-    Auto-detect WoW Logs directory from this script's location.
-    Expects: WoW/_anniversary_/Interface/AddOns/<AddonName>/bridge.py
-    Logs at: WoW/_anniversary_/Logs
+    Resolve the WoW Logs directory via, in order:
+      1. Relative walk (works when bridge is dropped inside AddOns dir).
+      2. Cached path from bridge_config.json.
+      3. Common install locations (macOS / Windows).
+      4. Interactive prompt to the user.
+
+    On success, the resolved path is written to bridge_config.json so
+    subsequent runs skip discovery.
     """
-    # Go up from AddOns/<AddonName>/ to _anniversary_/
-    wow_game_dir = SCRIPT_DIR.parent.parent.parent
-    logs_dir = wow_game_dir / "Logs"
-    if logs_dir.is_dir():
-        return str(logs_dir)
-    return ""
+    # 1. Relative walk: AddOns/<AddonName>/bridge.py -> ../../../Logs
+    try:
+        wow_game_dir = SCRIPT_DIR.parent.parent.parent
+        relative = _logs_dir_in(wow_game_dir)
+        if relative:
+            return relative
+    except Exception:
+        pass
 
-# =============================================================================
-# BOSS NPC IDS
-# =============================================================================
+    # 2. Cached path.
+    cached = read_bridge_config().get("logsDir", "")
+    if cached and Path(cached).is_dir():
+        return cached
 
-# World boss NPC IDs (extracted from combat log GUIDs)
-BOSS_NPC_IDS = {
-    "18728": "Doom Lord Kazzak",
-    "17711": "Doomwalker",
-}
+    # 3. Common install locations.
+    for candidate in _WOW_INSTALL_CANDIDATES:
+        resolved = _logs_dir_in(Path(candidate))
+        if resolved:
+            _persist_logs_dir(resolved)
+            return resolved
 
-# Boss key mapping (addon uses lowercase keys)
-BOSS_KEY_TO_NAME = {
-    "kazzak": "Doom Lord Kazzak",
-    "doomwalker": "Doomwalker",
-    "test": "TEST KILL",
-}
+    # 4. Interactive prompt.
+    print()
+    print("[SETUP] Could not auto-detect your WoW install location.")
+    print("[SETUP] Please paste the full path to your WoW install folder")
+    print("[SETUP] (the folder containing Logs/ and WTF/). Examples:")
+    print("[SETUP]   macOS:   /Applications/World of Warcraft/_anniversary_")
+    print("[SETUP]   Windows: C:\\Program Files\\World of Warcraft\\_anniversary_")
+    while True:
+        try:
+            entered = input("[SETUP] WoW install path: ").strip().strip('"').strip("'")
+        except EOFError:
+            return ""
+        if not entered:
+            print("[SETUP] Empty input. Try again, or Ctrl+C to abort.")
+            continue
+        resolved = _logs_dir_in(Path(entered))
+        if resolved:
+            _persist_logs_dir(resolved)
+            return resolved
+        print(f"[SETUP] No Logs/ folder at {entered}. Try again.")
+
+
+def _persist_logs_dir(path: str) -> None:
+    cfg = read_bridge_config()
+    cfg["logsDir"] = path
+    write_bridge_config(cfg)
+
 
 # Combat events that indicate boss activity
 COMBAT_EVENTS = {
@@ -182,11 +269,13 @@ def parse_combat_line(line: str) -> dict | None:
     source_guid = fields[1]
     source_name = fields[2].strip('"') if len(fields) > 2 else ""
 
-    # Check if source is a boss
+    # Check if source is a boss the addon asked us to watch.
     npc_id = extract_npc_id_from_guid(source_guid)
-    if npc_id and npc_id in BOSS_NPC_IDS:
+    if npc_id and npc_id in _watched_npc_ids:
+        boss_key = _watched_npc_ids[npc_id]
         return {
-            "boss_name": BOSS_NPC_IDS[npc_id],
+            "boss_name": _boss_display_names.get(boss_key, boss_key),
+            "boss_key": boss_key,
             "npc_id": npc_id,
             "event": event_type,
             "source_name": source_name,
@@ -199,9 +288,11 @@ def parse_combat_line(line: str) -> dict | None:
         dest_name = fields[5].strip('"') if len(fields) > 5 else ""
 
         npc_id = extract_npc_id_from_guid(dest_guid)
-        if npc_id and npc_id in BOSS_NPC_IDS:
+        if npc_id and npc_id in _watched_npc_ids:
+            boss_key = _watched_npc_ids[npc_id]
             return {
-                "boss_name": BOSS_NPC_IDS[npc_id],
+                "boss_name": _boss_display_names.get(boss_key, boss_key),
+                "boss_key": boss_key,
                 "npc_id": npc_id,
                 "event": event_type,
                 "source_name": dest_name,
@@ -264,13 +355,19 @@ def should_alert(boss_name: str) -> bool:
 
 def post_to_bot(alert: dict) -> bool:
     """Post alert to bot API. Returns True on success."""
-    if not CONFIG["BOT_API_URL"]:
+    bot_api_url = _runtime_config.get("botApiUrl", "")
+    if not bot_api_url:
         print("[ERROR] No bot API URL configured!")
         return False
 
-    api_url = CONFIG["BOT_API_URL"].rstrip("/") + "/webhook/alert"
-    alert["guildId"] = CONFIG["GUILD_ID"]
-    alert["discordId"] = CONFIG["DISCORD_ID"]
+    api_url = bot_api_url.rstrip("/") + "/webhook/alert"
+    alert["guildId"] = _runtime_config.get("guildId", "")
+    alert["discordId"] = _runtime_config.get("discordId", "")
+    # Forward the meta breadcrumb (addonVersion, schemaVersion) unmodified so
+    # the bot sees exactly what the addon published.
+    if _cached_meta:
+        for key, value in _cached_meta.items():
+            alert.setdefault(key, value)
 
     try:
         response = requests.post(api_url, json=alert, timeout=10)
@@ -359,6 +456,93 @@ def read_character_name() -> str:
     except IOError:
         pass
     return _cached_character_name
+
+
+def _find_table_block(content: str, key_marker: str) -> str | None:
+    """Locate a `["<key>"] = { ... }` block and return the text between its braces.
+
+    Uses brace-depth counting so nested tables are handled correctly.
+    """
+    start = content.find(key_marker)
+    if start == -1:
+        return None
+    brace = content.find('{', start)
+    if brace == -1:
+        return None
+    depth = 0
+    for i in range(brace, len(content)):
+        if content[i] == '{':
+            depth += 1
+        elif content[i] == '}':
+            depth -= 1
+            if depth == 0:
+                return content[brace + 1:i]
+    return None
+
+
+def _parse_string_dict(block: str) -> dict:
+    """Extract `["k"] = "v"` pairs from a flat Lua table body."""
+    return {m.group(1): m.group(2)
+            for m in re.finditer(r'\["([^"]+)"\]\s*=\s*"([^"]*)"', block)}
+
+
+def reload_config_from_savedvars() -> bool:
+    """Refresh user-owned config + watch tables + meta from the addon's
+    SavedVariables file. Returns True if the file could be read."""
+    global _watched_npc_ids, _boss_display_names, _cached_meta
+
+    sv_file = find_savedvariables_file()
+    if not sv_file:
+        return False
+    try:
+        with open(sv_file, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+    except IOError:
+        return False
+
+    config_block = _find_table_block(content, '["config"]')
+    if config_block is not None:
+        cfg_pairs = _parse_string_dict(config_block)
+        for key in ("guildId", "discordId", "botApiUrl"):
+            if key in cfg_pairs:
+                _runtime_config[key] = cfg_pairs[key]
+
+    watched_block = _find_table_block(content, '["watchedNpcIds"]')
+    if watched_block is not None:
+        _watched_npc_ids = _parse_string_dict(watched_block)
+
+    names_block = _find_table_block(content, '["bossDisplayNames"]')
+    if names_block is not None:
+        _boss_display_names = _parse_string_dict(names_block)
+
+    meta_block = _find_table_block(content, '["meta"]')
+    if meta_block is not None:
+        meta: dict = {}
+        for m in re.finditer(
+            r'\["(\w+)"\]\s*=\s*(?:"([^"]*)"|([\d.]+))', meta_block
+        ):
+            key = m.group(1)
+            str_val = m.group(2)
+            num_val = m.group(3)
+            if str_val is not None:
+                meta[key] = str_val
+            elif num_val is not None:
+                try:
+                    meta[key] = int(num_val)
+                except ValueError:
+                    meta[key] = float(num_val)
+        _cached_meta = meta
+
+    return True
+
+
+def is_runtime_config_complete() -> bool:
+    """True when the addon has published all three required config values."""
+    return bool(
+        _runtime_config.get("guildId")
+        and _runtime_config.get("discordId")
+        and _runtime_config.get("botApiUrl")
+    )
 
 
 def parse_savedvariables(path: str, verbose: bool = False) -> dict:
@@ -607,7 +791,7 @@ def post_kill_report(kill: dict) -> bool:
         # For test kills, use the actual creature name
         boss_name = test_target if test_target else "Unknown Creature"
     else:
-        boss_name = BOSS_KEY_TO_NAME.get(boss_key, boss_key)
+        boss_name = _boss_display_names.get(boss_key, boss_key)
 
     alert = {
         "alertType": "BOSS_KILLED",
@@ -972,7 +1156,7 @@ def check_scout_report(state: dict, verbose: bool = False) -> None:
         layer_id = report.get("layerId", "?")
         character_name = report.get("characterName", "")
 
-        boss_name = BOSS_KEY_TO_NAME.get(boss, boss)
+        boss_name = _boss_display_names.get(boss, boss)
         if action == "on":
             print(f"[SCOUT] New scout report: {character_name} scouting {boss_name} on Layer {layer} ({layer_id})")
         else:
@@ -1102,7 +1286,7 @@ def check_callout_report(state: dict, verbose: bool = False) -> None:
         layer_id = report.get("layerId", "?")
         character_name = report.get("characterName", "")
 
-        boss_name = BOSS_KEY_TO_NAME.get(boss, boss)
+        boss_name = _boss_display_names.get(boss, boss)
         print(f"[CALLOUT] New callout: {character_name} calling out {boss_name} on Layer {layer} ({layer_id})")
 
         callout_time, callout_date = format_timestamp(report["timestamp"])
@@ -1182,6 +1366,9 @@ def tail_log_file(state: dict):
             # Periodically check for pending kill reports
             now = time.time()
             if now - last_kill_check >= CONFIG["KILL_REPORT_CHECK_INTERVAL"]:
+                # Refresh user config + watch tables + meta first so every
+                # downstream post_to_bot call uses the freshest values.
+                reload_config_from_savedvars()
                 check_pending_kills(state, verbose=False)
                 check_layer_snapshot(state, verbose=False)
                 check_scout_report(state, verbose=False)
@@ -1324,16 +1511,34 @@ def process_line(line: str) -> None:
     post_to_bot(alert)
 
 
+def wait_for_addon_config() -> None:
+    """Block until the addon has published guildId + discordId + botApiUrl.
+
+    The addon flushes SavedVariables only on /reload or logout, so during this
+    loop we're waiting for the user to (a) run `/bwb setup` in-game and (b)
+    reload their UI.
+    """
+    announced_waiting = False
+    while True:
+        reload_config_from_savedvars()
+        if is_runtime_config_complete():
+            if announced_waiting:
+                print("[WAIT] In-game setup detected. Resuming...")
+            return
+        if not announced_waiting:
+            print("[WAIT] In-game setup not complete. Run |/bwb setup| in WoW")
+            print("[WAIT] (and |/reload|) to supply Guild ID, Discord ID, and Bot API URL.")
+            announced_waiting = True
+        time.sleep(CONFIG["WAIT_MESSAGE_INTERVAL"])
+
+
 def main_loop() -> None:
     """Main processing loop."""
-    print(f"[BoneyWorldBosses] Starting bridge v3.1 (combat log + kill reports)...")
-    print(f"  Bot API: {CONFIG['BOT_API_URL']}")
+    print(f"[BoneyWorldBosses] Starting bridge v{BRIDGE_VERSION} (combat log + kill reports)...")
     print(f"  Logs dir: {CONFIG['LOGS_DIR']}")
     print(f"  Poll interval: {CONFIG['POLL_INTERVAL']}s")
     print(f"  Dedup window: {CONFIG['DEDUP_WINDOW']}s")
     print(f"  Kill report check: every {CONFIG['KILL_REPORT_CHECK_INTERVAL']}s")
-    print(f"  Watching for NPC IDs: {', '.join(BOSS_NPC_IDS.keys())}")
-    print(f"  Boss names: {', '.join(BOSS_NPC_IDS.values())}")
     print()
 
     # Show current combat log file
@@ -1350,12 +1555,22 @@ def main_loop() -> None:
     else:
         print(f"[KILL] SavedVariables not found yet (will check after WoW login)")
 
-    # Read cached character name and discord ID from SavedVariables
+    # Populate runtime config + watch tables from SavedVariables before
+    # the first kill check. If user hasn't completed in-game setup, wait.
+    reload_config_from_savedvars()
+    if not is_runtime_config_complete():
+        wait_for_addon_config()
+
     char_name = read_character_name()
     if char_name:
         print(f"[CONFIG] Character: {char_name}")
-    if CONFIG["DISCORD_ID"]:
-        print(f"[CONFIG] Discord ID: {CONFIG['DISCORD_ID']}")
+    print(f"[CONFIG] Guild ID: {_runtime_config.get('guildId', '')}")
+    print(f"[CONFIG] Bot API: {_runtime_config.get('botApiUrl', '')}")
+    if _watched_npc_ids:
+        print(f"[CONFIG] Watching NPC ids: {', '.join(sorted(_watched_npc_ids.keys()))}")
+    if _cached_meta:
+        print(f"[CONFIG] Addon version: {_cached_meta.get('addonVersion', 'unknown')} "
+              f"(schema {_cached_meta.get('schemaVersion', '?')})")
     print()
 
     # Load state
@@ -1380,49 +1595,35 @@ def main_loop() -> None:
         print("\n[SHUTDOWN] Received interrupt, exiting...")
 
 
-def validate_config() -> bool:
-    """Validate configuration before starting."""
-    # Auto-detect LOGS_DIR if not manually set
-    if not CONFIG["LOGS_DIR"]:
-        detected = auto_detect_logs_dir()
-        if detected:
-            CONFIG["LOGS_DIR"] = detected
-            print(f"[CONFIG] Auto-detected Logs directory: {detected}")
+def resolve_logs_dir() -> bool:
+    """Resolve LOGS_DIR via auto-detect + optional interactive prompt.
 
-    errors = []
+    User-owned config (Discord IDs, bot URL) is NOT validated here — that
+    lives in the addon's SavedVariables and is handled by wait_for_addon_config.
+    """
+    if CONFIG["LOGS_DIR"] and os.path.isdir(CONFIG["LOGS_DIR"]):
+        return True
 
-    if not CONFIG["BOT_API_URL"]:
-        errors.append("BOT_API_URL is not set")
+    detected = auto_detect_logs_dir()
+    if detected and os.path.isdir(detected):
+        CONFIG["LOGS_DIR"] = detected
+        print(f"[CONFIG] Logs directory: {detected}")
+        return True
 
-    if not CONFIG["GUILD_ID"]:
-        errors.append("GUILD_ID is not set (set it to your Discord server ID in bridge.py)")
-
-    if not CONFIG["LOGS_DIR"]:
-        errors.append("LOGS_DIR is not set (could not auto-detect from script location)")
-    elif not os.path.isdir(CONFIG["LOGS_DIR"]):
-        errors.append(f"LOGS_DIR does not exist: {CONFIG['LOGS_DIR']}")
-
-    if errors:
-        print("[CONFIG ERROR] Please fix the following issues:")
-        for error in errors:
-            print(f"  - {error}")
-        print()
-        print("Edit the CONFIG section at the top of this script.")
-        return False
-
-    return True
+    print("[CONFIG ERROR] Could not locate your WoW Logs directory.")
+    return False
 
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("  Boney World Bosses - Bridge v3.1")
+    print(f"  Boney World Bosses - Bridge v{BRIDGE_VERSION}")
     print("  Scout: Combat log detection (real-time)")
     print("  Reporter: Kill reports (after /reload)")
-    print("  Watches for Kazzak/Doomwalker")
+    print("  Config + watch list read from SavedVariables")
     print("=" * 60)
     print()
 
-    if not validate_config():
+    if not resolve_logs_dir():
         sys.exit(1)
 
     main_loop()

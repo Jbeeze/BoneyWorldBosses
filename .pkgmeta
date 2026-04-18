@@ -1,0 +1,17 @@
+package-as: BoneyWorldBosses
+
+enable-nolib-creation: no
+
+ignore:
+  - bridge.py
+  - run_bridge.bat
+  - run_bridge.command
+  - requirements.txt
+  - bridge_config.json
+  - bridge_state.json
+  - "**/__pycache__"
+  - .claude
+  - .github
+  - dist
+  - build
+  - "*.spec"
