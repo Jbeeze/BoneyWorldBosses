@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Boney World Bosses - Discord Bridge v3.4
+Boney World Bosses - Discord Bridge v4.0
 Reads all user configuration (guild id, discord id, bot api url, watched NPC ids,
 boss display names) from the addon's SavedVariables file. No user-editable
 constants live in this script.
@@ -26,7 +26,7 @@ from pathlib import Path
 
 import requests
 
-BRIDGE_VERSION = "3.4.0"
+BRIDGE_VERSION = "4.0.0"
 
 # =============================================================================
 # OPERATIONAL CONFIG — not user-editable; user values live in SavedVariables.
@@ -103,18 +103,6 @@ def write_bridge_config(cfg: dict) -> None:
         print(f"[WARN] Could not write {BRIDGE_CONFIG_FILE}: {e}")
 
 
-# Common WoW install roots to try when auto-detecting. Each path is
-# probed for a `Logs/` sibling — first match wins.
-_WOW_INSTALL_CANDIDATES = [
-    "/Applications/World of Warcraft/_anniversary_",
-    "/Applications/World of Warcraft/_classic_era_anniversary_",
-    "C:/Program Files/World of Warcraft/_anniversary_",
-    "C:/Program Files/World of Warcraft/_classic_era_anniversary_",
-    "C:/Program Files (x86)/World of Warcraft/_anniversary_",
-    "C:/Program Files (x86)/World of Warcraft/_classic_era_anniversary_",
-]
-
-
 def _logs_dir_in(root: Path) -> str:
     logs = root / "Logs"
     if logs.is_dir():
@@ -125,39 +113,19 @@ def _logs_dir_in(root: Path) -> str:
 def auto_detect_logs_dir() -> str:
     """
     Resolve the WoW Logs directory via, in order:
-      1. Relative walk (works when bridge is dropped inside AddOns dir).
-      2. Cached path from bridge_config.json.
-      3. Common install locations (macOS / Windows).
-      4. Interactive prompt to the user.
+      1. Cached path from bridge_config.json.
+      2. Interactive prompt to the user.
 
     On success, the resolved path is written to bridge_config.json so
     subsequent runs skip discovery.
     """
-    # 1. Relative walk: AddOns/<AddonName>/bridge.py -> ../../../Logs
-    try:
-        wow_game_dir = SCRIPT_DIR.parent.parent.parent
-        relative = _logs_dir_in(wow_game_dir)
-        if relative:
-            return relative
-    except Exception:
-        pass
-
-    # 2. Cached path.
     cached = read_bridge_config().get("logsDir", "")
     if cached and Path(cached).is_dir():
         return cached
 
-    # 3. Common install locations.
-    for candidate in _WOW_INSTALL_CANDIDATES:
-        resolved = _logs_dir_in(Path(candidate))
-        if resolved:
-            _persist_logs_dir(resolved)
-            return resolved
-
-    # 4. Interactive prompt.
     print()
-    print("[SETUP] Could not auto-detect your WoW install location.")
-    print("[SETUP] Please paste the full path to your WoW install folder")
+    print("[SETUP] First-run setup — tell the bridge where WoW is installed.")
+    print("[SETUP] Paste the full path to your WoW flavor folder")
     print("[SETUP] (the folder containing Logs/ and WTF/). Examples:")
     print("[SETUP]   macOS:   /Applications/World of Warcraft/_anniversary_")
     print("[SETUP]   Windows: C:\\Program Files\\World of Warcraft\\_anniversary_")
@@ -1614,6 +1582,11 @@ def resolve_logs_dir() -> bool:
     return False
 
 
+def _running_from_addons_folder() -> bool:
+    """True if SCRIPT_DIR appears to sit inside a WoW AddOns folder."""
+    return any(part.lower() == "addons" for part in SCRIPT_DIR.parts)
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print(f"  Boney World Bosses - Bridge v{BRIDGE_VERSION}")
@@ -1622,6 +1595,16 @@ if __name__ == "__main__":
     print("  Config + watch list read from SavedVariables")
     print("=" * 60)
     print()
+
+    if _running_from_addons_folder():
+        print("!" * 60)
+        print("[MIGRATE] This bridge is running from inside an AddOns folder.")
+        print("[MIGRATE] Starting with v4.0.0, the bridge is distributed")
+        print("[MIGRATE] separately from the addon. Please download the latest")
+        print("[MIGRATE] release and run it from any folder OUTSIDE AddOns/:")
+        print("[MIGRATE]   https://github.com/Jbeeze/WorldBossAnnouncerBridge/releases")
+        print("!" * 60)
+        print()
 
     if not resolve_logs_dir():
         sys.exit(1)
