@@ -4,7 +4,7 @@ A WoW Classic addon + companion bridge that automatically detects world boss act
 
 Works with the [WorldBossTracker Discord bot](https://github.com/Jbeeze/WorldBossTrackerDiscordBot).
 
-> **Architecture.** The addon ships via CurseForge (pure Lua) and stores all user config in WoW's SavedVariables. A small Python companion bridge reads those SavedVariables and forwards events to your Discord bot. The bridge is distributed separately via GitHub Releases — CurseForge rules forbid shipping executables inside an addon.
+> **Architecture.** The addon ships via CurseForge (pure Lua) and stores all user config in WoW's SavedVariables. A small Python companion bridge reads those SavedVariables and forwards events to your Discord bot. The bridge lives in a separate repo — [`WorldBossAnnouncerBridge`](https://github.com/Jbeeze/WorldBossAnnouncerBridge) — because CurseForge rules forbid shipping executables inside an addon.
 
 ---
 
@@ -17,15 +17,15 @@ Works with the [WorldBossTracker Discord bot](https://github.com/Jbeeze/WorldBos
 
 ## Install the bridge
 
-Grab the companion bridge for your OS from [GitHub Releases](https://github.com/Jbeeze/WorldBossAnnouncerAddon/releases):
+The bridge lives in its own repo: **[Jbeeze/WorldBossAnnouncerBridge](https://github.com/Jbeeze/WorldBossAnnouncerBridge/releases)**. Grab the binary for your OS from its Releases page:
 
 - **Windows:** `bridge.exe` — double-click to run.
 - **macOS:** `bridge` (Unix executable). First launch: right-click → **Open** → **Open** to bypass Gatekeeper (we don't notarize). After that it runs normally.
-- **Python users:** `bridge.py` + `requirements.txt` — `pip install -r requirements.txt` then `python3 bridge.py`.
+- **Python users:** grab the source bundle from the same Releases page.
 
-The bridge keeps a terminal window open while you play. Leave it running in the background.
+Drop the binary **anywhere on your computer except inside your WoW `AddOns/` folder** — somewhere like `~/Documents/` or `C:\Tools\` is fine. The bridge keeps a terminal window open while you play; leave it running in the background.
 
-On first launch it auto-detects your WoW install (checks the common macOS and Windows paths); if that fails, it prompts you for the folder.
+On first launch it prompts you for your WoW install folder (the `_anniversary_` or `_classic_era_anniversary_` folder containing `Logs/` and `WTF/`). That path is cached in `bridge_config.json` next to the bridge, so subsequent launches skip the prompt.
 
 ## Configure in-game
 
@@ -70,7 +70,7 @@ Run `/combatlog` in WoW once to start combat logging. Then:
 Run `/bwb setup` in WoW, then `/reload`. The bridge will pick up the config on its next poll. SavedVariables only flush on `/reload` or logout — that's a WoW engine limitation.
 
 **Bridge can't find your WoW install**
-It prompts for a path on first run. Paste the folder containing `Logs/` and `WTF/` (usually `_anniversary_` under your WoW install). The path is cached in `bridge_config.json` next to the bridge.
+On first launch the bridge asks you to paste the folder containing `Logs/` and `WTF/` (usually `_anniversary_` under your WoW install). The path is cached in `bridge_config.json` next to the bridge; if that cache stops resolving (you reinstalled WoW elsewhere), delete `bridge_config.json` and restart the bridge.
 
 **No alerts in Discord**
 - Bridge terminal reports errors? Read them — they're usually explicit (e.g. "Bot API returned 401").
@@ -85,10 +85,8 @@ Right-click the `bridge` binary → **Open** → click **Open** in the dialog. m
 
 ## For developers
 
-Lua addon code lives in `BoneyWorldBosses.lua`. Python bridge is `bridge.py`.
+Lua addon code lives in `BoneyWorldBosses.lua`. The bridge source and release pipeline live in the separate [`WorldBossAnnouncerBridge`](https://github.com/Jbeeze/WorldBossAnnouncerBridge) repo.
 
-The bridge is a **dumb forwarder** — it reads boss NPC IDs, display names, and user config from SavedVariables every ~5 seconds and passes opaque payloads (including the addon's `meta.addonVersion` / `meta.schemaVersion` breadcrumb) to the bot API. Adding a new boss is addon-only; bridge doesn't need updates.
+The bridge is a **dumb forwarder** — it reads boss NPC IDs, display names, and user config from SavedVariables every ~5 seconds and passes opaque payloads (including the addon's `meta.addonVersion` / `meta.schemaVersion` breadcrumb) to the bot API. Adding a new boss is addon-only; the bridge doesn't need updates.
 
 CurseForge packaging is controlled by `.pkgmeta` — everything except `.toc` / `.lua` / `README.md` is excluded from the shipped zip.
-
-Bridge releases are built via `.github/workflows/release-bridge.yml` on version tags. PyInstaller produces one-file binaries per platform.
