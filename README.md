@@ -4,7 +4,7 @@ A WoW Classic addon + companion bridge that automatically detects world boss act
 
 Works with the [WorldBossTracker Discord bot](https://github.com/Jbeeze/WorldBossTrackerDiscordBot).
 
-> **Architecture.** The addon ships via CurseForge (pure Lua) and stores all user config in WoW's SavedVariables. A small Python companion bridge reads those SavedVariables and forwards events to your Discord bot. The bridge lives in a separate repo — [`WorldBossAnnouncerBridge`](https://github.com/Jbeeze/WorldBossAnnouncerBridge) — because CurseForge rules forbid shipping executables inside an addon.
+> **Architecture.** The addon ships via CurseForge (pure Lua) and stores all user config in WoW's SavedVariables. A small Python companion bridge reads those SavedVariables and forwards events to your Discord bot. The bridge lives in a separate repo — [`BoneyWorldBoss-Bridge`](https://github.com/Jbeeze/BoneyWorldBoss-Bridge) — because CurseForge rules forbid shipping executables inside an addon.
 
 ---
 
@@ -17,7 +17,7 @@ Works with the [WorldBossTracker Discord bot](https://github.com/Jbeeze/WorldBos
 
 ## Install the bridge
 
-The bridge lives in its own repo: **[Jbeeze/WorldBossAnnouncerBridge](https://github.com/Jbeeze/WorldBossAnnouncerBridge/releases)**. Grab the binary for your OS from its Releases page:
+The bridge lives in its own repo: **[Jbeeze/BoneyWorldBoss-Bridge](https://github.com/Jbeeze/BoneyWorldBoss-Bridge/releases)**. Grab the binary for your OS from its Releases page:
 
 - **Windows:** `bridge.exe` — double-click to run.
 - **macOS:** `bridge` (Unix executable). First launch: right-click → **Open** → **Open** to bypass Gatekeeper (we don't notarize). After that it runs normally.
@@ -85,7 +85,7 @@ Right-click the `bridge` binary → **Open** → click **Open** in the dialog. m
 
 ## For developers
 
-Lua addon code lives in `BoneyWorldBosses.lua`. The bridge source and release pipeline live in the separate [`WorldBossAnnouncerBridge`](https://github.com/Jbeeze/WorldBossAnnouncerBridge) repo.
+Lua addon code lives in `BoneyWorldBosses.lua`. The bridge source and release pipeline live in the separate [`BoneyWorldBoss-Bridge`](https://github.com/Jbeeze/BoneyWorldBoss-Bridge) repo.
 
 The bridge is a **dumb forwarder** — it reads boss NPC IDs, display names, and user config from SavedVariables every ~5 seconds and passes opaque payloads (including the addon's `meta.addonVersion` / `meta.schemaVersion` breadcrumb) to the bot API. Adding a new boss is addon-only; the bridge doesn't need updates.
 
