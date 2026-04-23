@@ -6,7 +6,7 @@
 --   Layer Updates: NWB layer data reporting to Discord
 
 local ADDON_NAME = "BoneyWorldBosses"
-local VERSION = "3.4.0"
+local VERSION = "3.4.1"
 local SCHEMA_VERSION = 1
 
 -- Create AceAddon (NWB bundles LibStub + AceAddon-3.0)
@@ -649,8 +649,18 @@ StaticPopupDialogs["WBA_CONFIRM_SCOUT_OFF"] = {
 -- SETUP WIZARD
 -- =============================================================================
 
--- Chained StaticPopup dialogs: Guild -> Discord -> Bot API URL -> ReloadUI.
+-- Chained StaticPopup dialogs: Server -> User -> Bot API URL -> ReloadUI.
 -- button1 is live-enabled via EditBoxOnTextChanged so invalid input can't be submitted.
+
+-- Classic Era 1.15 doesn't always populate dialog.button1 / dialog.editBox as
+-- direct fields — fall back to the global-name lookup that has always worked.
+local function PopupButton1(popup)
+    return popup.button1 or _G[popup:GetName() .. "Button1"]
+end
+
+local function PopupEditBox(popup)
+    return popup.editBox or _G[popup:GetName() .. "EditBox"]
+end
 
 local function BuildSetupPopup(fieldLabel, validator, maxLetters, onAccept)
     return {
@@ -661,34 +671,36 @@ local function BuildSetupPopup(fieldLabel, validator, maxLetters, onAccept)
         maxLetters = maxLetters,
         editBoxWidth = 260,
         OnShow = function(self, data)
-            self.editBox:SetText(data or "")
-            self.editBox:HighlightText()
-            self.editBox:SetFocus()
-            if validator(self.editBox:GetText()) then
-                self.button1:Enable()
+            local editBox = PopupEditBox(self)
+            local button1 = PopupButton1(self)
+            editBox:SetText(data or "")
+            editBox:HighlightText()
+            editBox:SetFocus()
+            if validator(editBox:GetText()) then
+                button1:Enable()
             else
-                self.button1:Disable()
+                button1:Disable()
             end
         end,
         EditBoxOnTextChanged = function(self)
-            local parent = self:GetParent()
+            local button1 = PopupButton1(self:GetParent())
             if validator(self:GetText()) then
-                parent.button1:Enable()
+                button1:Enable()
             else
-                parent.button1:Disable()
+                button1:Disable()
             end
         end,
         EditBoxOnEnterPressed = function(self)
-            local parent = self:GetParent()
-            if parent.button1:IsEnabled() then
-                parent.button1:Click()
+            local button1 = PopupButton1(self:GetParent())
+            if button1:IsEnabled() then
+                button1:Click()
             end
         end,
         EditBoxOnEscapePressed = function(self)
             self:GetParent():Hide()
         end,
         OnAccept = function(self)
-            onAccept(self.editBox:GetText())
+            onAccept(PopupEditBox(self):GetText())
         end,
         OnCancel = function()
             print("|cff00ff00[BoneyWorldBosses]|r Setup cancelled. Run |cffffff00/bwb setup|r to resume.")
@@ -701,12 +713,12 @@ local function BuildSetupPopup(fieldLabel, validator, maxLetters, onAccept)
 end
 
 StaticPopupDialogs["WBA_SETUP_GUILD"] = BuildSetupPopup(
-    "Boney World Bosses Setup (1/3)\n\nEnter your Discord |cffffff00Guild ID|r (17-19 digit snowflake):",
+    "Boney World Bosses Setup (1/3)\n\nEnter your |cffffff00Discord ID|r (17-19 digit snowflake):",
     IsValidSnowflake,
     19,
     function(value)
         db.config.guildId = value
-        print("|cff00ff00[BoneyWorldBosses]|r Guild ID saved.")
+        print("|cff00ff00[BoneyWorldBosses]|r Discord ID saved.")
         StaticPopup_Show("WBA_SETUP_DISCORD", nil, nil, db.config.discordId)
     end
 )
@@ -717,7 +729,7 @@ StaticPopupDialogs["WBA_SETUP_DISCORD"] = BuildSetupPopup(
     19,
     function(value)
         db.config.discordId = value
-        print("|cff00ff00[BoneyWorldBosses]|r Discord ID saved.")
+        print("|cff00ff00[BoneyWorldBosses]|r Discord User ID saved.")
         StaticPopup_Show("WBA_SETUP_API", nil, nil, db.config.botApiUrl)
     end
 )
