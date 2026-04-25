@@ -6,8 +6,8 @@
 --   Layer Updates: NWB layer data reporting to Discord
 
 local ADDON_NAME = "BoneyWorldBosses"
-local VERSION = "3.4.2"
-local SCHEMA_VERSION = 1
+local VERSION = "3.5.0"
+local SCHEMA_VERSION = 2
 
 -- Create AceAddon (NWB bundles LibStub + AceAddon-3.0)
 local BWB = LibStub("AceAddon-3.0"):NewAddon(ADDON_NAME)
@@ -32,6 +32,21 @@ local ZONE_TO_BOSS = {
     ["Shadowmoon Valley"] = "doomwalker",
 }
 
+-- DBM journal encounter ids. Verify by running:
+--   /run for k,v in pairs(DBM_AllSavedStats) do print(k, v.kills, v.pulls, v.bestSaveTime) end
+-- If a hardcoded id is wrong on a given install, the runtime mod scan in
+-- ResolveDbmEncounterId() rediscovers the right one via NPC id.
+local BOSS_DBM_ENCOUNTER_IDS = {
+    kazzak = 1024,
+    doomwalker = 1027,
+}
+
+-- Inverse map for the runtime DBM mod scan (NPC id -> boss key)
+local BOSS_NPC_TO_KEY = {}
+for npcId, key in pairs(BOSS_NPC_IDS) do
+    BOSS_NPC_TO_KEY[npcId] = key
+end
+
 -- =============================================================================
 -- SAVED VARIABLES
 -- =============================================================================
@@ -41,6 +56,7 @@ local DB_DEFAULTS = {
     config = {
         scoutEnabled = true,    -- Combat log detection (existing)
         reporterEnabled = true, -- Kill reporting (new)
+        dbmStatsEnabled = true, -- DBM stats snapshot sync (new in v3.5.0)
         guildId = "",           -- Discord guild/server ID (set via /bwb setup)
         discordId = "",         -- User's Discord ID (set via /bwb setup)
         botApiUrl = "",         -- Bot API URL (set via /bwb setup)
@@ -429,6 +445,160 @@ local function WriteLayerSnapshot(trigger)
 end
 
 -- =============================================================================
+-- DBM INTEGRATION (v3.5.0)
+-- =============================================================================
+-- Reads per-character kill stats (Victories, Wipes, Best Victory) for Kazzak
+-- and Doomwalker out of Deadly Boss Mods' DBM_AllSavedStats and stages a
+-- snapshot in db.dbmStats for the bridge to forward. DBM is OPTIONAL: if it
+-- isn't loaded the entire feature silently no-ops.
+
+local function IsDbmAvailable()
+    -- DBM exposes itself as the global `DBM`; DBM_AllSavedStats may still be
+    -- nil until DBM has recorded at least one boss attempt on this character.
+    return _G.DBM ~= nil
+end
+
+-- Walk DBM's loaded mods and find one whose creature ids include `npcId`.
+-- Returns the mod's encounter id (the stat key DBM uses) or nil.
+local function ScanDbmModsForNpc(npcId)
+    if not _G.DBM then return nil end
+    local mods = _G.DBM.Mods
+    if type(mods) ~= "table" and type(_G.DBM.GetMods) == "function" then
+        mods = _G.DBM:GetMods()
+    end
+    if type(mods) ~= "table" then return nil end
+
+    for _, mod in pairs(mods) do
+        if type(mod) == "table" then
+            if mod.creatureId == npcId then
+                return mod.modId or mod.id or mod.encounterId
+            end
+            local multi = mod.multiMobPullDetection
+            if type(multi) == "table" then
+                for _, id in ipairs(multi) do
+                    if id == npcId then
+                        return mod.modId or mod.id or mod.encounterId
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- Resolve the stat-table key for a boss. Hardcoded id first; fall back to a
+-- runtime mod scan keyed on NPC id so a DBM renumbering doesn't silently
+-- break us.
+local function ResolveDbmEncounterId(bossKey)
+    local hardcoded = BOSS_DBM_ENCOUNTER_IDS[bossKey]
+    if hardcoded and _G.DBM_AllSavedStats and _G.DBM_AllSavedStats[hardcoded] then
+        return hardcoded
+    end
+    local npcId
+    for id, key in pairs(BOSS_NPC_IDS) do
+        if key == bossKey then
+            npcId = id
+            break
+        end
+    end
+    if not npcId then return hardcoded end
+    return ScanDbmModsForNpc(npcId) or hardcoded
+end
+
+-- Read the per-boss row out of DBM_AllSavedStats. Returns zeros + nil
+-- bestVictory if DBM has no entry yet (rather than returning nil), so the
+-- bot still gets a "DBM is loaded but hasn't seen this boss" signal.
+-- Returns nil only when DBM itself isn't loaded.
+local function ReadDbmStatsForBoss(bossKey)
+    if not IsDbmAvailable() then
+        return nil
+    end
+    local encounterId = ResolveDbmEncounterId(bossKey)
+    local row = encounterId and _G.DBM_AllSavedStats and _G.DBM_AllSavedStats[encounterId] or nil
+
+    local kills = (row and tonumber(row.kills)) or 0
+    local pulls = (row and tonumber(row.pulls)) or 0
+    -- DBM tracks pulls (attempts) and kills; a "wipe" is an attempt that
+    -- didn't end in a kill.
+    local wipes = math.max(0, pulls - kills)
+    local bestVictory = row and tonumber(row.bestSaveTime) or nil
+
+    return {
+        encounterId = encounterId,
+        victories = kills,
+        wipes = wipes,
+        bestVictory = bestVictory,
+    }
+end
+
+-- Build the snapshot table written into db.dbmStats. Returns nil if DBM
+-- isn't loaded, so PushDbmStatsSnapshot can silently no-op.
+local function BuildDbmStatsSnapshot()
+    if not IsDbmAvailable() then
+        return nil
+    end
+    local kazzak = ReadDbmStatsForBoss("kazzak") or {}
+    local doomwalker = ReadDbmStatsForBoss("doomwalker") or {}
+
+    return {
+        timestamp = GetServerTime(),
+        characterName = UnitName("player"),
+        realm = GetRealmName(),
+        bosses = {
+            kazzak = {
+                victories = kazzak.victories or 0,
+                wipes = kazzak.wipes or 0,
+                bestVictory = kazzak.bestVictory,
+            },
+            doomwalker = {
+                victories = doomwalker.victories or 0,
+                wipes = doomwalker.wipes or 0,
+                bestVictory = doomwalker.bestVictory,
+            },
+        },
+        diagnostics = {
+            dbmDetected = true,
+            encounterIdsResolved = {
+                kazzak = kazzak.encounterId,
+                doomwalker = doomwalker.encounterId,
+            },
+        },
+    }
+end
+
+-- Stage a DBM snapshot into db.dbmStats. SavedVariables only flush to disk
+-- on /reload or logout, so the user needs a /reload (or natural one from
+-- the Report Kill popup) before the bridge sees it.
+local function PushDbmStatsSnapshot(verbose)
+    if not db then return false end
+    if not db.config.dbmStatsEnabled then
+        if verbose then
+            print("|cffff8800[BoneyWorldBosses]|r DBM stats sync disabled. /bwb dbm on to enable.")
+        end
+        return false
+    end
+    local snapshot = BuildDbmStatsSnapshot()
+    if not snapshot then
+        if verbose then
+            print("|cffff8800[BoneyWorldBosses]|r DBM not detected. Install Deadly Boss Mods to sync stats.")
+        end
+        return false
+    end
+    db.dbmStats = snapshot
+    if verbose then
+        local function fmt(stats)
+            local best = stats.bestVictory and string.format("%.1fs", stats.bestVictory) or "-"
+            return string.format("V:%d W:%d Best:%s", stats.victories, stats.wipes, best)
+        end
+        print("|cff00ff00[BoneyWorldBosses]|r DBM snapshot staged.")
+        print("  Kazzak: " .. fmt(snapshot.bosses.kazzak))
+        print("  Doomwalker: " .. fmt(snapshot.bosses.doomwalker))
+        print("  /reload to flush to bridge.")
+    end
+    return true
+end
+
+-- =============================================================================
 -- FRAMES
 -- =============================================================================
 
@@ -511,6 +681,16 @@ local function OnUnitDied(destGuid, destName)
 
     -- Add to pending kills
     table.insert(db.pendingKills, killRecord)
+
+    -- Refresh DBM stats snapshot. Delay 2s so DBM has finished incrementing
+    -- its in-memory tables for this kill (handler ordering between addons
+    -- on COMBAT_LOG_EVENT_UNFILTERED is undefined). Skip for test kills,
+    -- since DBM hasn't actually recorded anything for an arbitrary creature.
+    if not isTestKill and db.config.dbmStatsEnabled then
+        C_Timer.After(2, function()
+            PushDbmStatsSnapshot(false)
+        end)
+    end
 
     print("|cff00ff00[BoneyWorldBosses]|r Kill detected: " .. bossDisplayName)
     if isTestKill then
@@ -970,6 +1150,12 @@ function BWB:OnEnable()
     C_Timer.After(5, function()
         WriteLayerSnapshot("login")
     end)
+
+    -- Stage a DBM stats snapshot. Delay matches the layer snapshot above so
+    -- DBM (which loads on ADDON_LOADED) has fully populated its globals.
+    C_Timer.After(5, function()
+        PushDbmStatsSnapshot(false)
+    end)
 end
 
 -- =============================================================================
@@ -1119,6 +1305,9 @@ local function SlashHandler(msg)
         local testStatus = testKillModeActive and "|cffff8800ARMED|r" or "off"
         print("  Scout (combat logging): " .. scoutStatus)
         print("  Reporter (kill reports): " .. reporterStatus)
+        local dbmConfig = db.config.dbmStatsEnabled and "|cff00ff00ON|r" or "|cffff0000OFF|r"
+        local dbmDetected = IsDbmAvailable() and "|cff00ff00detected|r" or "|cffff0000not detected|r"
+        print("  DBM stats: " .. dbmConfig .. " (DBM " .. dbmDetected .. ")")
         print("  Combat logging: " .. loggingStatus .. " (required for Scout/Test)")
         local scoutingReportStatus = db.scoutingActive and "|cff00ff00ACTIVE|r" or "off"
         print("  Test kill mode: " .. testStatus)
@@ -1445,6 +1634,71 @@ local function SlashHandler(msg)
     elseif cmd == "layers" then
         StaticPopup_Show("WBA_CONFIRM_LAYER_SNAPSHOT")
 
+    elseif cmd == "dbm" then
+        local subcmd = args[2]
+        if subcmd == "on" then
+            db.config.dbmStatsEnabled = true
+            print("|cff00ff00[BoneyWorldBosses]|r DBM stats sync |cff00ff00ENABLED|r. /reload to flush.")
+        elseif subcmd == "off" then
+            db.config.dbmStatsEnabled = false
+            print("|cff00ff00[BoneyWorldBosses]|r DBM stats sync |cffff0000DISABLED|r. /reload to flush.")
+        elseif subcmd == "sync" then
+            PushDbmStatsSnapshot(true)
+        elseif subcmd == "dump" then
+            if not _G.DBM_AllSavedStats then
+                print("|cffff8800[BoneyWorldBosses]|r DBM_AllSavedStats not present. Is DBM loaded?")
+            else
+                print("|cff00ff00[BoneyWorldBosses]|r DBM_AllSavedStats relevant entries:")
+                for _, bossKey in ipairs({ "kazzak", "doomwalker" }) do
+                    local id = ResolveDbmEncounterId(bossKey)
+                    local row = id and _G.DBM_AllSavedStats[id] or nil
+                    if row then
+                        print(string.format("  %s (encounterId=%s): kills=%s pulls=%s bestSaveTime=%s",
+                            bossKey, tostring(id),
+                            tostring(row.kills), tostring(row.pulls), tostring(row.bestSaveTime)))
+                    else
+                        print(string.format("  %s (encounterId=%s): no stats row", bossKey, tostring(id)))
+                    end
+                end
+            end
+        elseif subcmd == "status" or subcmd == nil then
+            local enabled = db.config.dbmStatsEnabled and "|cff00ff00ON|r" or "|cffff0000OFF|r"
+            local detected = IsDbmAvailable() and "|cff00ff00yes|r" or "|cffff0000no|r"
+            print("|cff00ff00[BoneyWorldBosses]|r DBM stats sync: " .. enabled)
+            print("  DBM detected: " .. detected)
+            if IsDbmAvailable() then
+                local kazzakId = ResolveDbmEncounterId("kazzak")
+                local doomId = ResolveDbmEncounterId("doomwalker")
+                print(string.format("  Encounter ids: kazzak=%s, doomwalker=%s",
+                    tostring(kazzakId), tostring(doomId)))
+                local snap = db.dbmStats
+                if snap and snap.timestamp then
+                    print(string.format("  Last snapshot: %s (%d)",
+                        date("%Y-%m-%d %H:%M:%S", snap.timestamp), snap.timestamp))
+                    local function fmt(s)
+                        local best = s.bestVictory and string.format("%.1fs", s.bestVictory) or "-"
+                        return string.format("V:%d W:%d Best:%s", s.victories or 0, s.wipes or 0, best)
+                    end
+                    if snap.bosses then
+                        print("  Kazzak:     " .. fmt(snap.bosses.kazzak or {}))
+                        print("  Doomwalker: " .. fmt(snap.bosses.doomwalker or {}))
+                    end
+                else
+                    print("  No snapshot staged yet. Run /bwb dbm sync.")
+                end
+                if not _G.DBM_AllSavedStats then
+                    print("|cffff8800  DBM_AllSavedStats is empty. If DBM doesn't track Kazzak/Doomwalker,")
+                    print("|cffff8800  you may need DBM-Outlands or an equivalent submodule installed.|r")
+                end
+            end
+        else
+            print("|cff00ff00[BoneyWorldBosses]|r DBM commands:")
+            print("  /bwb dbm status - Show DBM detection + last snapshot")
+            print("  /bwb dbm sync   - Stage a fresh snapshot (then /reload)")
+            print("  /bwb dbm on|off - Toggle DBM stats sync")
+            print("  /bwb dbm dump   - Print raw DBM_AllSavedStats rows for our bosses")
+        end
+
     elseif cmd == "test" then
         local subcmd = args[2]
         if subcmd == "kill" then
@@ -1481,6 +1735,7 @@ local function SlashHandler(msg)
         print("  /bwb log              - Kill report management (status/clear/update)")
         print("  /bwb options          - Open settings panel")
         print("  /bwb test kill        - Test mode (next creature kill = test report)")
+        print("  /bwb dbm              - DBM stats sync (status/sync/on/off/dump)")
         print("  /bwb layers           - Send layer update to Discord (reloads UI)")
         print("  /bwb callout          - Post @everyone boss callout to Discord (reloads UI)")
         print("")
