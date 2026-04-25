@@ -398,7 +398,7 @@ local function BuildLayerSnapshot(trigger)
     end
 
     return {
-        timestamp = time(),
+        timestamp = GetServerTime(),
         trigger = trigger,
         zones = zones,
         characterName = UnitName("player"),
@@ -492,7 +492,7 @@ local function OnUnitDied(destGuid, destName)
     local killDate = FormatDateServerTime()
     local layerId = ExtractLayerIdFromGuid(destGuid) or "?"
     local layer = GetCurrentLayer(layerId)
-    local timestamp = time()
+    local timestamp = GetServerTime()
 
     -- Create kill record
     local killRecord = {
@@ -1023,7 +1023,7 @@ local function SlashHandler(msg)
                 layer = layer,
                 layerId = layerId,
                 characterName = UnitName("player"),
-                        timestamp = time(),
+                        timestamp = GetServerTime(),
             }
             db.scoutingActive = true
             db.scoutingContext = { boss = bossKey, layer = layer, layerId = layerId }
@@ -1055,7 +1055,7 @@ local function SlashHandler(msg)
                 layer = offLayer,
                 layerId = offLayerId,
                 characterName = UnitName("player"),
-                        timestamp = time(),
+                        timestamp = GetServerTime(),
             }
             db.scoutingActive = false
             db.scoutingContext = nil
@@ -1085,7 +1085,7 @@ local function SlashHandler(msg)
             layer = layer,
             layerId = layerId,
             characterName = characterName,
-            timestamp = time(),
+            timestamp = GetServerTime(),
         }
         StaticPopup_Show("WBA_CONFIRM_CALLOUT", displayName, layer)
 
@@ -1534,7 +1534,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 layer = ctx.layer or "?",
                 layerId = ctx.layerId or "?",
                 characterName = UnitName("player"),
-                        timestamp = time(),
+                        timestamp = GetServerTime(),
             }
             db.scoutingActive = false
             db.scoutingContext = nil
