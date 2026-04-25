@@ -6,7 +6,7 @@
 --   Layer Updates: NWB layer data reporting to Discord
 
 local ADDON_NAME = "BoneyWorldBosses"
-local VERSION = "3.4.1"
+local VERSION = "3.4.2"
 local SCHEMA_VERSION = 1
 
 -- Create AceAddon (NWB bundles LibStub + AceAddon-3.0)
