@@ -6,7 +6,7 @@
 --   Layer Updates: NWB layer data reporting to Discord
 
 local ADDON_NAME = "BoneyWorldBosses"
-local VERSION = "3.5.0"
+local VERSION = "3.6.0"
 local SCHEMA_VERSION = 2
 
 -- Create AceAddon (NWB bundles LibStub + AceAddon-3.0)
@@ -60,7 +60,7 @@ local DB_DEFAULTS = {
         guildId = "",           -- Discord guild/server ID (set via /bwb setup)
         discordId = "",         -- User's Discord ID (set via /bwb setup)
         botApiUrl = "",         -- Bot API URL (set via /bwb setup)
-        characterRoles = {},    -- Per-character role: { [characterName] = "tank"|"healer"|"dps" }
+        characterRoles = {},    -- Per-character role: { [characterName] = { main = "tank"|"healer"|"dps", offspec = "tank"|"healer"|"dps"|nil } }
     },
     pendingKills = {},
     -- pendingKills format:
@@ -609,6 +609,21 @@ end
 
 local VALID_ROLES = { tank = true, healer = true, dps = true }
 
+-- Migrate any legacy string entries ({ [name] = "tank" }) to the v3.6 shape
+-- ({ [name] = { main = "tank" } }) in place. Idempotent.
+local function MigrateCharacterRoles()
+    if not db or not db.config or not db.config.characterRoles then return end
+    for charName, entry in pairs(db.config.characterRoles) do
+        if type(entry) == "string" then
+            if VALID_ROLES[entry] then
+                db.config.characterRoles[charName] = { main = entry }
+            else
+                db.config.characterRoles[charName] = nil
+            end
+        end
+    end
+end
+
 -- Build the snapshot table assigned to db.charProfile. Returns nil if the
 -- user has no roles declared yet, so PushCharProfileSnapshot can no-op.
 local function BuildCharProfileSnapshot()
@@ -616,9 +631,11 @@ local function BuildCharProfileSnapshot()
     local roles = db.config.characterRoles or {}
     local hasAny = false
     local out = {}
-    for charName, role in pairs(roles) do
-        if VALID_ROLES[role] then
-            out[charName] = role
+    for charName, entry in pairs(roles) do
+        if type(entry) == "table" and VALID_ROLES[entry.main] then
+            local row = { main = entry.main }
+            if VALID_ROLES[entry.offspec] then row.offspec = entry.offspec end
+            out[charName] = row
             hasAny = true
         end
     end
@@ -644,8 +661,12 @@ local function PushCharProfileSnapshot(verbose)
     db.charProfile = snapshot
     if verbose then
         print("|cff00ff00[BoneyWorldBosses]|r Character role snapshot staged:")
-        for charName, role in pairs(snapshot.roles) do
-            print(string.format("  %s: %s", charName, role))
+        for charName, row in pairs(snapshot.roles) do
+            if row.offspec then
+                print(string.format("  %s: %s (OS: %s)", charName, row.main, row.offspec))
+            else
+                print(string.format("  %s: %s", charName, row.main))
+            end
         end
         print("  /reload to flush to bridge.")
     end
@@ -976,6 +997,139 @@ local function StartSetupWizard()
 end
 
 -- =============================================================================
+-- CHARACTER PROFILE WIZARD (/bwb profile)
+-- =============================================================================
+
+-- Per-character popup chain: pick main spec -> has offspec? -> pick offspec
+-- (if yes) -> confirm + reload. Writes db.config.characterRoles[currentChar].
+-- Module-local buffer holds the in-progress selection across popups.
+local profileBuffer = { main = nil, offspec = nil }
+
+local function ResetProfileBuffer()
+    profileBuffer.main = nil
+    profileBuffer.offspec = nil
+end
+
+local function FormatRoleLabel(role)
+    if role == "tank" then return "Tank" end
+    if role == "healer" then return "Healer" end
+    if role == "dps" then return "DPS" end
+    return tostring(role)
+end
+
+-- Defined before the popup tables so the closures below capture it as an
+-- upvalue (Lua resolves locals at function-creation time, not at call time).
+-- The body references StaticPopupDialogs["WBA_PROFILE_CONFIRM"] by string key,
+-- which is fine because that table is defined further down and looked up
+-- at call time.
+local function ShowProfileConfirm()
+    local charName = UnitName("player")
+    local mainLabel = FormatRoleLabel(profileBuffer.main)
+    local osLabel = profileBuffer.offspec and FormatRoleLabel(profileBuffer.offspec) or "(none)"
+    StaticPopupDialogs["WBA_PROFILE_CONFIRM"].text = string.format(
+        "Boney World Bosses\n\nSet |cffffff00%s|r to:\n  Main: |cffffff00%s|r\n  Off-spec: |cffffff00%s|r\n\nThis will reload the UI to flush to the bridge.",
+        charName, mainLabel, osLabel
+    )
+    StaticPopup_Show("WBA_PROFILE_CONFIRM")
+end
+
+-- Note: button2 maps to OnCancel (WoW StaticPopup convention), so Esc would
+-- silently pick "Healer" if hideOnEscape were true. We disable Esc on the
+-- spec-picker popups so the user must explicitly click one of the three.
+StaticPopupDialogs["WBA_PROFILE_MAIN"] = {
+    text = "Boney World Bosses\n\nPick |cffffff00Main Spec|r for |cffffff00%s|r:",
+    button1 = "Tank",
+    button2 = "Healer",
+    button3 = "DPS",
+    OnAccept = function()
+        profileBuffer.main = "tank"
+        StaticPopup_Show("WBA_PROFILE_HAS_OS", UnitName("player"))
+    end,
+    OnCancel = function()
+        profileBuffer.main = "healer"
+        StaticPopup_Show("WBA_PROFILE_HAS_OS", UnitName("player"))
+    end,
+    OnAlt = function()
+        profileBuffer.main = "dps"
+        StaticPopup_Show("WBA_PROFILE_HAS_OS", UnitName("player"))
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = false,
+    preferredIndex = 3,
+}
+
+StaticPopupDialogs["WBA_PROFILE_HAS_OS"] = {
+    text = "Boney World Bosses\n\nDoes |cffffff00%s|r have an off-spec?",
+    button1 = "Yes",
+    button2 = "No",
+    OnAccept = function()
+        StaticPopup_Show("WBA_PROFILE_OS", UnitName("player"))
+    end,
+    OnCancel = function()
+        profileBuffer.offspec = nil
+        ShowProfileConfirm()
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
+StaticPopupDialogs["WBA_PROFILE_OS"] = {
+    text = "Boney World Bosses\n\nPick |cffffff00Off-Spec|r for |cffffff00%s|r:",
+    button1 = "Tank",
+    button2 = "Healer",
+    button3 = "DPS",
+    OnAccept = function()
+        profileBuffer.offspec = "tank"
+        ShowProfileConfirm()
+    end,
+    OnCancel = function()
+        profileBuffer.offspec = "healer"
+        ShowProfileConfirm()
+    end,
+    OnAlt = function()
+        profileBuffer.offspec = "dps"
+        ShowProfileConfirm()
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = false,
+    preferredIndex = 3,
+}
+
+StaticPopupDialogs["WBA_PROFILE_CONFIRM"] = {
+    text = "",  -- rewritten per-show via ShowProfileConfirm
+    button1 = "Confirm & Reload",
+    button2 = "Cancel",
+    OnAccept = function()
+        local charName = UnitName("player")
+        if not db.config.characterRoles then db.config.characterRoles = {} end
+        local entry = { main = profileBuffer.main }
+        if profileBuffer.offspec then entry.offspec = profileBuffer.offspec end
+        db.config.characterRoles[charName] = entry
+        PushCharProfileSnapshot(false)
+        ResetProfileBuffer()
+        print("|cff00ff00[BoneyWorldBosses]|r Profile saved. Reloading...")
+        ReloadUI()
+    end,
+    OnCancel = function()
+        ResetProfileBuffer()
+        print("|cff00ff00[BoneyWorldBosses]|r Profile cancelled.")
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
+local function StartProfileWizard()
+    ResetProfileBuffer()
+    StaticPopup_Show("WBA_PROFILE_MAIN", UnitName("player"))
+end
+
+-- =============================================================================
 -- INTERFACE OPTIONS PANEL
 -- =============================================================================
 
@@ -1210,6 +1364,10 @@ function BWB:OnEnable()
     C_Timer.After(5, function()
         PushDbmStatsSnapshot(false)
     end)
+
+    -- Migrate any pre-3.6 string-shaped role entries before staging the
+    -- snapshot. Idempotent.
+    MigrateCharacterRoles()
 
     -- Stage character role snapshot if the user has declared any. No-ops
     -- silently for users who haven't run /bwb role yet.
@@ -1692,6 +1850,9 @@ local function SlashHandler(msg)
     elseif cmd == "layers" then
         StaticPopup_Show("WBA_CONFIRM_LAYER_SNAPSHOT")
 
+    elseif cmd == "profile" then
+        StartProfileWizard()
+
     elseif cmd == "role" then
         local sub = args[2]
         local currentChar = UnitName("player")
@@ -1701,42 +1862,40 @@ local function SlashHandler(msg)
         local roles = db.config.characterRoles
 
         if sub == nil then
-            local current = roles[currentChar]
-            if current then
-                print("|cff00ff00[BoneyWorldBosses]|r " .. currentChar .. " is set as |cffffff00" .. current .. "|r.")
+            local entry = roles[currentChar]
+            if entry then
+                local osPart = entry.offspec and (" / OS " .. entry.offspec) or ""
+                print("|cff00ff00[BoneyWorldBosses]|r " .. currentChar .. ": |cffffff00" .. entry.main .. osPart .. "|r")
             else
-                print("|cff00ff00[BoneyWorldBosses]|r " .. currentChar .. " has no role set.")
-                print("  /bwb role tank | healer | dps")
+                print("|cff00ff00[BoneyWorldBosses]|r " .. currentChar .. " has no profile set.")
+                print("  Run |cffffff00/bwb profile|r to declare main + off-spec.")
             end
-        elseif sub == "tank" or sub == "healer" or sub == "dps" then
-            roles[currentChar] = sub
-            PushCharProfileSnapshot(false)
-            print("|cff00ff00[BoneyWorldBosses]|r " .. currentChar .. " set to |cffffff00" .. sub .. "|r. /reload to flush.")
         elseif sub == "clear" then
             if roles[currentChar] then
                 roles[currentChar] = nil
                 PushCharProfileSnapshot(false)
-                print("|cff00ff00[BoneyWorldBosses]|r Cleared role for " .. currentChar .. ". /reload to flush.")
+                print("|cff00ff00[BoneyWorldBosses]|r Cleared profile for " .. currentChar .. ". /reload to flush.")
             else
-                print("|cff00ff00[BoneyWorldBosses]|r " .. currentChar .. " had no role set.")
+                print("|cff00ff00[BoneyWorldBosses]|r " .. currentChar .. " had no profile set.")
             end
         elseif sub == "list" then
             local count = 0
             for _ in pairs(roles) do count = count + 1 end
             if count == 0 then
-                print("|cff00ff00[BoneyWorldBosses]|r No character roles declared. /bwb role tank|healer|dps")
+                print("|cff00ff00[BoneyWorldBosses]|r No character profiles declared. Run /bwb profile.")
             else
-                print("|cff00ff00[BoneyWorldBosses]|r Character roles (" .. count .. "):")
-                for charName, role in pairs(roles) do
-                    print("  " .. charName .. ": " .. role)
+                print("|cff00ff00[BoneyWorldBosses]|r Character profiles (" .. count .. "):")
+                for charName, entry in pairs(roles) do
+                    local osPart = entry.offspec and (" / OS " .. entry.offspec) or ""
+                    print("  " .. charName .. ": " .. entry.main .. osPart)
                 end
             end
         else
             print("|cff00ff00[BoneyWorldBosses]|r Role commands:")
-            print("  /bwb role               - Show current character's role")
-            print("  /bwb role tank|healer|dps - Set current character's main spec role")
-            print("  /bwb role clear         - Clear current character's role")
-            print("  /bwb role list          - List all roles set on this account")
+            print("  /bwb role         - Show current character's profile")
+            print("  /bwb role clear   - Clear current character's profile")
+            print("  /bwb role list    - List all profiles set on this account")
+            print("  /bwb profile      - Declare main + off-spec for current character (popup)")
         end
 
     elseif cmd == "dbm" then
@@ -1841,7 +2000,8 @@ local function SlashHandler(msg)
         print("  /bwb options          - Open settings panel")
         print("  /bwb test kill        - Test mode (next creature kill = test report)")
         print("  /bwb dbm              - DBM stats sync (status/sync/on/off/dump)")
-        print("  /bwb role             - Set main spec role per character (tank/healer/dps)")
+        print("  /bwb profile          - Declare main + off-spec for current character (popup)")
+        print("  /bwb role             - View / clear / list character profiles")
         print("  /bwb layers           - Send layer update to Discord (reloads UI)")
         print("  /bwb callout          - Post @everyone boss callout to Discord (reloads UI)")
         print("")
