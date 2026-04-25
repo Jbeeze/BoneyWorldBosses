@@ -441,9 +441,6 @@ local isLoggingEnabled = false
 -- Test kill mode: next UNIT_DIED triggers a test kill report
 local testKillModeActive = false
 
--- Flag to distinguish scout ReloadUI from real logout (not persisted)
-local intentionalReload = false
-
 -- =============================================================================
 -- KILL DETECTION
 -- =============================================================================
@@ -549,7 +546,6 @@ StaticPopupDialogs["WBA_CONFIRM_KILL_REPORT"] = {
     button2 = "Cancel",
     OnAccept = function()
         print("|cff00ff00[BoneyWorldBosses]|r Reloading UI to flush kill report...")
-        intentionalReload = true
         ReloadUI()
     end,
     OnCancel = function()
@@ -568,7 +564,6 @@ StaticPopupDialogs["WBA_CONFIRM_LAYER_SNAPSHOT"] = {
     OnAccept = function()
         if WriteLayerSnapshot("manual") then
             print("|cff00ff00[BoneyWorldBosses]|r Reloading UI to flush layer snapshot...")
-            intentionalReload = true
             ReloadUI()
         end
     end,
@@ -587,7 +582,6 @@ StaticPopupDialogs["WBA_CONFIRM_SCOUT_ON"] = {
     button2 = "Cancel",
     OnAccept = function()
         print("|cff00ff00[BoneyWorldBosses]|r Reloading UI to send scout report...")
-        intentionalReload = true
         ReloadUI()
     end,
     OnCancel = function()
@@ -609,7 +603,6 @@ StaticPopupDialogs["WBA_CONFIRM_CALLOUT"] = {
     button2 = "Cancel",
     OnAccept = function()
         print("|cff00ff00[BoneyWorldBosses]|r Reloading UI to send callout...")
-        intentionalReload = true
         ReloadUI()
     end,
     OnCancel = function()
@@ -630,7 +623,6 @@ StaticPopupDialogs["WBA_CONFIRM_SCOUT_OFF"] = {
     button2 = "Cancel",
     OnAccept = function()
         print("|cff00ff00[BoneyWorldBosses]|r Reloading UI to send scout-off report...")
-        intentionalReload = true
         ReloadUI()
     end,
     OnCancel = function()
@@ -741,7 +733,6 @@ StaticPopupDialogs["WBA_SETUP_API"] = BuildSetupPopup(
     function(value)
         db.config.botApiUrl = value
         print("|cff00ff00[BoneyWorldBosses]|r Bot API URL saved. Reloading UI so the bridge can pick up your config...")
-        intentionalReload = true
         ReloadUI()
     end
 )
@@ -1516,28 +1507,8 @@ frame:SetScript("OnEvent", function(self, event, ...)
     if event == "COMBAT_LOG_EVENT_UNFILTERED" then
         OnCombatLogEvent()
     elseif event == "PLAYER_LOGOUT" then
-        -- Only write the "logout" snapshot on a real logout. Intentional reloads
-        -- (scout on/off, /bwb layers, /bwb callout, kill-report popup) would
-        -- otherwise clobber a trigger="manual" snapshot with trigger="logout".
-        if not intentionalReload then
-            WriteLayerSnapshot("logout")
-        end
-        -- Auto scout-off on logout/exit (skip if there's already a pending report,
-        -- e.g. a scout-on that triggered this ReloadUI)
-        -- NOTE: Do NOT call C_Map or other world APIs here — they can error during
-        -- PLAYER_LOGOUT and abort the handler. Use only persisted context data.
-        if db and db.scoutingActive and not intentionalReload then
-            local ctx = db.scoutingContext or {}
-            db.scoutReport = {
-                action = "off",
-                boss = ctx.boss or "",
-                layer = ctx.layer or "?",
-                layerId = ctx.layerId or "?",
-                characterName = UnitName("player"),
-                        timestamp = GetServerTime(),
-            }
-            db.scoutingActive = false
-            db.scoutingContext = nil
-        end
+        -- Intentionally empty. Layer snapshots fire only on login (~line 970)
+        -- and via the /bwb layers manual popup. Scout-off is explicit only —
+        -- the bridge synthesizes an off if combat-log activity goes stale.
     end
 end)
