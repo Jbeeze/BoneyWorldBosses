@@ -60,6 +60,7 @@ local DB_DEFAULTS = {
         guildId = "",           -- Discord guild/server ID (set via /bwb setup)
         discordId = "",         -- User's Discord ID (set via /bwb setup)
         botApiUrl = "",         -- Bot API URL (set via /bwb setup)
+        characterRoles = {},    -- Per-character role: { [characterName] = "tank"|"healer"|"dps" }
     },
     pendingKills = {},
     -- pendingKills format:
@@ -593,6 +594,59 @@ local function PushDbmStatsSnapshot(verbose)
         print("|cff00ff00[BoneyWorldBosses]|r DBM snapshot staged.")
         print("  Kazzak: " .. fmt(snapshot.bosses.kazzak))
         print("  Doomwalker: " .. fmt(snapshot.bosses.doomwalker))
+        print("  /reload to flush to bridge.")
+    end
+    return true
+end
+
+-- =============================================================================
+-- CHARACTER PROFILE / ROLE (v3.5.0)
+-- =============================================================================
+-- User-declared per-character main spec role. Stored account-wide (under
+-- db.config.characterRoles) so all of a player's characters on this realm
+-- share one declaration set. Pushed to the bridge as a roles map snapshot;
+-- the bot upserts each (discordId, characterName) entry independently.
+
+local VALID_ROLES = { tank = true, healer = true, dps = true }
+
+-- Build the snapshot table assigned to db.charProfile. Returns nil if the
+-- user has no roles declared yet, so PushCharProfileSnapshot can no-op.
+local function BuildCharProfileSnapshot()
+    if not db then return nil end
+    local roles = db.config.characterRoles or {}
+    local hasAny = false
+    local out = {}
+    for charName, role in pairs(roles) do
+        if VALID_ROLES[role] then
+            out[charName] = role
+            hasAny = true
+        end
+    end
+    if not hasAny then return nil end
+    return {
+        timestamp = GetServerTime(),
+        realm = GetRealmName(),
+        roles = out,
+    }
+end
+
+-- Stage a role snapshot into db.charProfile. The bridge picks it up after
+-- /reload (same flush rules as the DBM snapshot).
+local function PushCharProfileSnapshot(verbose)
+    if not db then return false end
+    local snapshot = BuildCharProfileSnapshot()
+    if not snapshot then
+        if verbose then
+            print("|cffff8800[BoneyWorldBosses]|r No character roles set. Try /bwb role tank|healer|dps.")
+        end
+        return false
+    end
+    db.charProfile = snapshot
+    if verbose then
+        print("|cff00ff00[BoneyWorldBosses]|r Character role snapshot staged:")
+        for charName, role in pairs(snapshot.roles) do
+            print(string.format("  %s: %s", charName, role))
+        end
         print("  /reload to flush to bridge.")
     end
     return true
@@ -1156,6 +1210,10 @@ function BWB:OnEnable()
     C_Timer.After(5, function()
         PushDbmStatsSnapshot(false)
     end)
+
+    -- Stage character role snapshot if the user has declared any. No-ops
+    -- silently for users who haven't run /bwb role yet.
+    PushCharProfileSnapshot(false)
 end
 
 -- =============================================================================
@@ -1634,6 +1692,53 @@ local function SlashHandler(msg)
     elseif cmd == "layers" then
         StaticPopup_Show("WBA_CONFIRM_LAYER_SNAPSHOT")
 
+    elseif cmd == "role" then
+        local sub = args[2]
+        local currentChar = UnitName("player")
+        if not db.config.characterRoles then
+            db.config.characterRoles = {}
+        end
+        local roles = db.config.characterRoles
+
+        if sub == nil then
+            local current = roles[currentChar]
+            if current then
+                print("|cff00ff00[BoneyWorldBosses]|r " .. currentChar .. " is set as |cffffff00" .. current .. "|r.")
+            else
+                print("|cff00ff00[BoneyWorldBosses]|r " .. currentChar .. " has no role set.")
+                print("  /bwb role tank | healer | dps")
+            end
+        elseif sub == "tank" or sub == "healer" or sub == "dps" then
+            roles[currentChar] = sub
+            PushCharProfileSnapshot(false)
+            print("|cff00ff00[BoneyWorldBosses]|r " .. currentChar .. " set to |cffffff00" .. sub .. "|r. /reload to flush.")
+        elseif sub == "clear" then
+            if roles[currentChar] then
+                roles[currentChar] = nil
+                PushCharProfileSnapshot(false)
+                print("|cff00ff00[BoneyWorldBosses]|r Cleared role for " .. currentChar .. ". /reload to flush.")
+            else
+                print("|cff00ff00[BoneyWorldBosses]|r " .. currentChar .. " had no role set.")
+            end
+        elseif sub == "list" then
+            local count = 0
+            for _ in pairs(roles) do count = count + 1 end
+            if count == 0 then
+                print("|cff00ff00[BoneyWorldBosses]|r No character roles declared. /bwb role tank|healer|dps")
+            else
+                print("|cff00ff00[BoneyWorldBosses]|r Character roles (" .. count .. "):")
+                for charName, role in pairs(roles) do
+                    print("  " .. charName .. ": " .. role)
+                end
+            end
+        else
+            print("|cff00ff00[BoneyWorldBosses]|r Role commands:")
+            print("  /bwb role               - Show current character's role")
+            print("  /bwb role tank|healer|dps - Set current character's main spec role")
+            print("  /bwb role clear         - Clear current character's role")
+            print("  /bwb role list          - List all roles set on this account")
+        end
+
     elseif cmd == "dbm" then
         local subcmd = args[2]
         if subcmd == "on" then
@@ -1736,6 +1841,7 @@ local function SlashHandler(msg)
         print("  /bwb options          - Open settings panel")
         print("  /bwb test kill        - Test mode (next creature kill = test report)")
         print("  /bwb dbm              - DBM stats sync (status/sync/on/off/dump)")
+        print("  /bwb role             - Set main spec role per character (tank/healer/dps)")
         print("  /bwb layers           - Send layer update to Discord (reloads UI)")
         print("  /bwb callout          - Post @everyone boss callout to Discord (reloads UI)")
         print("")
