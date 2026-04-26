@@ -2,9 +2,9 @@
 ## Title: Boney World Bosses
 ## Notes: Scout (combat detection) and Reporter (kill reporting) for world boss Discord alerts
 ## Author: Jbeeze
-## Version: 3.4.2
+## Version: 3.7.0
 ## Dependencies: NovaWorldBuffs
-## OptionalDeps: DBM-Core
+## OptionalDeps: DBM-Core, Details
 ## SavedVariables: BoneyWorldBossesDB
 
 BoneyWorldBosses.lua
