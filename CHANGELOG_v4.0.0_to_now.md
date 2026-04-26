@@ -1,13 +1,13 @@
 # Changelog — v4.0.0 → now
 
-## v3.6.0 — 2026-04-25
-**Add `/bwb profile` for per-character main + off-spec declaration**
-- New popup chain: **Main Spec** → **Has off-spec?** → **Off-Spec** → **Confirm & Reload**. Run on each character that participates in boss reporting.
-- Data shape: `db.config.characterRoles[name]` is now `{ main, offspec }` (previously a bare role string). Legacy string entries are migrated in-place at `PLAYER_LOGIN`.
-- `BuildCharProfileSnapshot` pushes the new `{ main, offspec }` shape to the bridge — bot side will need a matching update to consume off-spec.
-- `/bwb role` now reads/clears/lists the new shape; `/bwb role <spec>` is removed in favor of `/bwb profile` (which has explicit confirmation before reload).
-- Esc is disabled on the spec-picker popups so it can't silently land on `Healer` (button2 = `OnCancel` by WoW convention).
-- Bumped `BoneyWorldBosses.toc` / `.lua` to **3.6.0**.
+## v3.4.2 — 2026-04-25
+**Add `/bwb profile` for per-character main spec declaration**
+- Single popup picker — clicking **Tank**, **Healer**, or **DPS** writes `db.config.characterRoles[currentChar]` and reloads immediately. Run on each character that participates in boss reporting.
+- Data shape: `db.config.characterRoles[name] = "tank"|"healer"|"dps"` (bare role string).
+- `BuildCharProfileSnapshot` pushes `snapshot.roles[name] = role` (string) to the bridge.
+- Slash surface consolidated under `/bwb profile`: bare command opens the popup, `/bwb profile clear` clears the current character, `/bwb profile list` lists all set profiles. `/bwb role` removed.
+- Esc is disabled on the spec popup so it can't silently land on `Healer` (button2 = `OnCancel` by WoW convention).
+- Bumped `BoneyWorldBosses.toc` / `.lua` to **3.4.2**.
 
 ## v3.4.1 — 2026-04-22 (`dc5582e`)
 **Fix stuck Next button in setup wizard**
