@@ -6,8 +6,8 @@
 --   Layer Updates: NWB layer data reporting to Discord
 
 local ADDON_NAME = "BoneyWorldBosses"
-local VERSION = "3.4.2"
-local SCHEMA_VERSION = 2
+local VERSION = "3.7.0"
+local SCHEMA_VERSION = 3
 
 -- Create AceAddon (NWB bundles LibStub + AceAddon-3.0)
 local BWB = LibStub("AceAddon-3.0"):NewAddon(ADDON_NAME)
@@ -41,6 +41,14 @@ local BOSS_DBM_ENCOUNTER_IDS = {
     doomwalker = 1027,
 }
 
+-- Details! keys actors by their localized name as it appears in the combat
+-- log. Used by the Details! integration to verify a captured combat segment
+-- actually contains the boss as an enemy (filters out trash/unrelated fights).
+local BOSS_DETAILS_NAMES = {
+    kazzak     = "Doom Lord Kazzak",
+    doomwalker = "Doomwalker",
+}
+
 -- Inverse map for the runtime DBM mod scan (NPC id -> boss key)
 local BOSS_NPC_TO_KEY = {}
 for npcId, key in pairs(BOSS_NPC_IDS) do
@@ -54,17 +62,25 @@ end
 -- Default saved variables structure
 local DB_DEFAULTS = {
     config = {
-        scoutEnabled = true,    -- Combat log detection (existing)
-        reporterEnabled = true, -- Kill reporting (new)
-        dbmStatsEnabled = true, -- DBM stats snapshot sync
-        guildId = "",           -- Discord guild/server ID (set via /bwb setup)
-        discordId = "",         -- User's Discord ID (set via /bwb setup)
-        botApiUrl = "",         -- Bot API URL (set via /bwb setup)
-        characterRoles = {},    -- Per-character main spec: { [characterName] = "tank"|"healer"|"dps" }
+        scoutEnabled = true,        -- Combat log detection (existing)
+        reporterEnabled = true,     -- Kill reporting (new)
+        dbmStatsEnabled = true,     -- DBM stats snapshot sync
+        detailsStatsEnabled = true, -- Top-3 DPS/heal capture from Details! Damage Meter
+        guildId = "",               -- Discord guild/server ID (set via /bwb setup)
+        discordId = "",             -- User's Discord ID (set via /bwb setup)
+        botApiUrl = "",             -- Bot API URL (set via /bwb setup)
+        characterRoles = {},        -- Per-character main spec: { [characterName] = "tank"|"healer"|"dps" }
     },
     pendingKills = {},
     -- pendingKills format:
-    -- { boss = "kazzak", time = "11:35am", layer = "2", layerId = "31401", timestamp = 1711043445 }
+    -- { boss = "kazzak", time = "11:35am", layer = "2", layerId = "31401",
+    --   timestamp = 1711043445, characterName = "Jbeeze",
+    --   detailsStats = {                                  -- optional, present if Details! captured
+    --       combatTime = 134,
+    --       topDps     = { { name="X", class="WARRIOR", dps=5432 }, ... },  -- up to 3
+    --       topHealers = { { name="Y", class="PRIEST",  hps=2100 }, ... },  -- up to 3
+    --   },
+    -- }
     layerSnapshot = nil,
     -- layerSnapshot format:
     -- { timestamp = 1711043445, trigger = "login", zones = { ["1944"] = { ["1"] = "106045" } } }
@@ -600,6 +616,199 @@ local function PushDbmStatsSnapshot(verbose)
 end
 
 -- =============================================================================
+-- DETAILS! INTEGRATION
+-- =============================================================================
+-- Reads top-3 DPS and top-3 effective HPS from the Details! Damage Meter
+-- combat segment that corresponds to a world boss kill, and embeds them on
+-- the kill record itself (db.pendingKills[i].detailsStats).
+--
+-- Capture is event-driven: we register a Details!-side listener for
+-- COMBAT_PLAYER_LEAVE, which fires after Details! has finalized the
+-- segment. ENCOUNTER_END does NOT fire for outdoor TBC world bosses
+-- (Kazzak/Doomwalker aren't on the encounter journal), so the Details!
+-- listener is the right hook -- not a C_Timer.After() guess.
+--
+-- Like DBM, Details! is OPTIONAL: if it isn't loaded, the listener never
+-- registers and kill records simply omit the detailsStats field.
+
+local DETAILS_MATCH_WINDOW = 60  -- pending kill must be <=60s old to enrich
+local detailsListener = nil
+
+local function IsDetailsAvailable()
+    return _G.Details ~= nil
+end
+
+-- Walk the last 5 finished segments looking for one where the boss appears
+-- as an enemy. combat:GetActor(1, name) is an O(1) name lookup against the
+-- damage container, which is faster than iterating the actor list.
+local function FindDetailsSegmentForBoss(bossKey)
+    if not IsDetailsAvailable() then return nil end
+    local bossName = BOSS_DETAILS_NAMES[bossKey]
+    if not bossName then return nil end
+    for i = 1, 5 do
+        local combat = _G.Details:GetCombat(i)
+        if not combat then break end
+        if combat:GetActor(1, bossName) then
+            return combat
+        end
+    end
+    return nil
+end
+
+-- Read top-N DPS player entries from a Details! combat segment.
+-- IsPlayer() includes any human-controlled actor (raid, party, or visible
+-- friendlies outside group). Pet damage is already rolled up to the owner
+-- by Details!, so we can ignore IsPetOrGuardian actors entirely.
+local function ReadTopDpsFromCombat(combat, n)
+    if not combat then return {} end
+    local container = combat:GetContainer(1)
+    if not container then return {} end
+    local actors = container:GetActorList()
+    if not actors then return {} end
+
+    local players = {}
+    for _, actor in ipairs(actors) do
+        if actor:IsPlayer() then
+            table.insert(players, {
+                name  = actor:GetDisplayName(),
+                class = actor:Class(),
+                dps   = math.floor((actor.last_dps or 0) + 0.5),
+            })
+        end
+    end
+    table.sort(players, function(a, b) return a.dps > b.dps end)
+    local top = {}
+    for i = 1, math.min(n, #players) do top[i] = players[i] end
+    return top
+end
+
+-- Read top-N effective HPS player entries from a Details! combat segment.
+-- actor.last_hps is overheal-excluded by Details!.
+local function ReadTopHpsFromCombat(combat, n)
+    if not combat then return {} end
+    local container = combat:GetContainer(2)
+    if not container then return {} end
+    local actors = container:GetActorList()
+    if not actors then return {} end
+
+    local players = {}
+    for _, actor in ipairs(actors) do
+        if actor:IsPlayer() and (actor.last_hps or 0) > 0 then
+            table.insert(players, {
+                name  = actor:GetDisplayName(),
+                class = actor:Class(),
+                hps   = math.floor((actor.last_hps or 0) + 0.5),
+            })
+        end
+    end
+    table.sort(players, function(a, b) return a.hps > b.hps end)
+    local top = {}
+    for i = 1, math.min(n, #players) do top[i] = players[i] end
+    return top
+end
+
+-- Build the per-fight stats payload from a combat segment.
+local function BuildDetailsPayloadFromCombat(combat)
+    if not combat then return nil end
+    local duration = 0
+    if type(combat.GetCombatTime) == "function" then
+        duration = combat:GetCombatTime() or 0
+    end
+    return {
+        combatTime = math.floor(duration + 0.5),
+        topDps     = ReadTopDpsFromCombat(combat, 3),
+        topHealers = ReadTopHpsFromCombat(combat, 3),
+    }
+end
+
+-- Find the most recent staged kill that hasn't been enriched yet, within
+-- DETAILS_MATCH_WINDOW seconds. Returns the killRecord or nil. Walking
+-- backward picks up the latest kill first; older un-enriched records
+-- (likely abandoned popups) fall outside the window naturally.
+local function FindRecentUnenrichedKill()
+    if not db or not db.pendingKills then return nil end
+    local now = GetServerTime()
+    for i = #db.pendingKills, 1, -1 do
+        local rec = db.pendingKills[i]
+        if rec and not rec.detailsStats and rec.timestamp
+           and (now - rec.timestamp) <= DETAILS_MATCH_WINDOW then
+            return rec
+        end
+    end
+    return nil
+end
+
+-- Triggered by Details!'s COMBAT_PLAYER_LEAVE event. The `combat` arg is
+-- the just-finalized segment.
+local function OnDetailsCombatEnd(event, combat)
+    if not db or not db.config.detailsStatsEnabled then return end
+    local rec = FindRecentUnenrichedKill()
+    if not rec then return end
+
+    -- Validate: ensure the boss appears in the captured segment. If not
+    -- (e.g. trash pulled the player into a fresh combat right after the
+    -- kill), walk back through the recent segment history.
+    local bossName = BOSS_DETAILS_NAMES[rec.boss]
+    local matched = combat
+    if bossName and combat and not combat:GetActor(1, bossName) then
+        matched = FindDetailsSegmentForBoss(rec.boss)
+    end
+    if not matched then
+        -- Test kills (rec.boss == "test") have no canonical boss name, so
+        -- we just accept the segment as-is.
+        if rec.boss == "test" then
+            matched = combat
+        else
+            rec.detailsStats = { unavailable = true, reason = "boss_not_in_segment" }
+            return
+        end
+    end
+
+    rec.detailsStats = BuildDetailsPayloadFromCombat(matched)
+end
+
+-- Manual capture for `/bwb details sync` and test kills. Reads the last
+-- completed segment regardless of boss match so users can verify the
+-- pipeline. GetCombat(1) is the most-recent finished segment; falls back
+-- to the in-progress segment if no finished one exists yet.
+local function CaptureLastDetailsSegment(verbose)
+    if not IsDetailsAvailable() then
+        if verbose then
+            print("|cffff8800[BoneyWorldBosses]|r Details! not detected. Install Details! Damage Meter to capture top DPS/heal stats.")
+        end
+        return nil
+    end
+    local combat = _G.Details:GetCombat(1) or _G.Details:GetCurrentCombat()
+    if not combat then
+        if verbose then
+            print("|cffff8800[BoneyWorldBosses]|r No Details! combat segment available yet.")
+        end
+        return nil
+    end
+    local payload = BuildDetailsPayloadFromCombat(combat)
+    if verbose and payload then
+        print(string.format("|cff00ff00[BoneyWorldBosses]|r Details! captured: %ds combat, %d top DPS, %d top healers.",
+            payload.combatTime, #payload.topDps, #payload.topHealers))
+    end
+    return payload
+end
+
+-- Register the Details! event listener for finalized combat segments.
+-- Idempotent: safe to call multiple times.
+local function RegisterDetailsListener()
+    if detailsListener then return true end
+    if not IsDetailsAvailable() then return false end
+    if type(_G.Details.CreateEventListener) ~= "function" then return false end
+    detailsListener = _G.Details:CreateEventListener()
+    detailsListener:RegisterEvent("COMBAT_PLAYER_LEAVE", OnDetailsCombatEnd)
+    return true
+end
+
+local function IsDetailsListenerActive()
+    return detailsListener ~= nil
+end
+
+-- =============================================================================
 -- CHARACTER PROFILE / ROLE
 -- =============================================================================
 -- User-declared per-character main spec. Stored account-wide (under
@@ -731,6 +940,17 @@ local function OnUnitDied(destGuid, destName)
         killRecord.isTest = true
         killRecord.testTargetName = destName or "Unknown"
         killRecord.testNpcId = npcId and tostring(npcId) or "?"
+
+        -- Eagerly attach Details! snapshot so test kills can validate the
+        -- full pipeline without waiting for COMBAT_PLAYER_LEAVE. If the
+        -- player is still in combat, the listener will skip this record
+        -- (already enriched) when it eventually fires.
+        if db.config.detailsStatsEnabled then
+            local payload = CaptureLastDetailsSegment(false)
+            if payload then
+                killRecord.detailsStats = payload
+            end
+        end
     end
 
     -- Add to pending kills
@@ -1250,6 +1470,14 @@ function BWB:OnEnable()
         PushDbmStatsSnapshot(false)
     end)
 
+    -- Register the Details! listener. Slightly later than DBM because
+    -- Details! finishes init a beat after DBM does on this client.
+    C_Timer.After(6, function()
+        if db.config.detailsStatsEnabled then
+            RegisterDetailsListener()
+        end
+    end)
+
     -- Stage character profile snapshot if the user has declared any. No-ops
     -- silently for users who haven't run /bwb profile yet.
     PushCharProfileSnapshot(false)
@@ -1405,6 +1633,10 @@ local function SlashHandler(msg)
         local dbmConfig = db.config.dbmStatsEnabled and "|cff00ff00ON|r" or "|cffff0000OFF|r"
         local dbmDetected = IsDbmAvailable() and "|cff00ff00detected|r" or "|cffff0000not detected|r"
         print("  DBM stats: " .. dbmConfig .. " (DBM " .. dbmDetected .. ")")
+        local detailsConfig = db.config.detailsStatsEnabled and "|cff00ff00ON|r" or "|cffff0000OFF|r"
+        local detailsDetected = IsDetailsAvailable() and "|cff00ff00detected|r" or "|cffff0000not detected|r"
+        local detailsListenerStr = IsDetailsListenerActive() and ", listener |cff00ff00registered|r" or ""
+        print("  Details! capture: " .. detailsConfig .. " (Details! " .. detailsDetected .. detailsListenerStr .. ")")
         print("  Combat logging: " .. loggingStatus .. " (required for Scout/Test)")
         local scoutingReportStatus = db.scoutingActive and "|cff00ff00ACTIVE|r" or "off"
         print("  Test kill mode: " .. testStatus)
@@ -1832,6 +2064,92 @@ local function SlashHandler(msg)
             print("  /bwb dbm dump   - Print raw DBM_AllSavedStats rows for our bosses")
         end
 
+    elseif cmd == "details" then
+        local subcmd = args[2]
+        if subcmd == "on" then
+            db.config.detailsStatsEnabled = true
+            -- Register listener now if Details! is loaded; harmless if not.
+            RegisterDetailsListener()
+            print("|cff00ff00[BoneyWorldBosses]|r Details! capture |cff00ff00ENABLED|r.")
+        elseif subcmd == "off" then
+            db.config.detailsStatsEnabled = false
+            print("|cff00ff00[BoneyWorldBosses]|r Details! capture |cffff0000DISABLED|r.")
+        elseif subcmd == "sync" then
+            local payload = CaptureLastDetailsSegment(true)
+            if payload then
+                -- Stash so /bwb details dump can show it even if no kill is pending.
+                db.detailsLastSync = payload
+                local rec = FindRecentUnenrichedKill()
+                if rec then
+                    rec.detailsStats = payload
+                    print("|cff00ff00[BoneyWorldBosses]|r Attached to most-recent pending kill. /reload to flush.")
+                else
+                    print("|cff00ff00[BoneyWorldBosses]|r Snapshot stashed in db.detailsLastSync (no recent unenriched kill to attach to).")
+                end
+            end
+        elseif subcmd == "dump" then
+            -- Prefer the most recent kill's detailsStats; fall back to the
+            -- last manual sync if no kill has been captured yet.
+            local source, payload
+            if db.pendingKills then
+                for i = #db.pendingKills, 1, -1 do
+                    if db.pendingKills[i].detailsStats then
+                        source = "pendingKills[" .. i .. "]"
+                        payload = db.pendingKills[i].detailsStats
+                        break
+                    end
+                end
+            end
+            if not payload and db.detailsLastSync then
+                source = "detailsLastSync"
+                payload = db.detailsLastSync
+            end
+            if not payload then
+                print("|cffff8800[BoneyWorldBosses]|r No Details! payload captured yet. Run /bwb details sync.")
+            elseif payload.unavailable then
+                print(string.format("|cffff8800[BoneyWorldBosses]|r %s: unavailable (%s)",
+                    source, tostring(payload.reason)))
+            else
+                print(string.format("|cff00ff00[BoneyWorldBosses]|r Details! payload (%s):", source))
+                print(string.format("  combatTime: %ds", payload.combatTime or 0))
+                print("  Top DPS:")
+                if payload.topDps and #payload.topDps > 0 then
+                    for i, p in ipairs(payload.topDps) do
+                        print(string.format("    %d. %s (%s) - %d dps", i, p.name or "?", p.class or "?", p.dps or 0))
+                    end
+                else
+                    print("    (none)")
+                end
+                print("  Top Healers:")
+                if payload.topHealers and #payload.topHealers > 0 then
+                    for i, p in ipairs(payload.topHealers) do
+                        print(string.format("    %d. %s (%s) - %d hps", i, p.name or "?", p.class or "?", p.hps or 0))
+                    end
+                else
+                    print("    (none)")
+                end
+            end
+        elseif subcmd == "status" or subcmd == nil then
+            local enabled = db.config.detailsStatsEnabled and "|cff00ff00ON|r" or "|cffff0000OFF|r"
+            local detected = IsDetailsAvailable() and "|cff00ff00yes|r" or "|cffff0000no|r"
+            local listener = IsDetailsListenerActive() and "|cff00ff00registered|r" or "|cffff0000not registered|r"
+            print("|cff00ff00[BoneyWorldBosses]|r Details! capture: " .. enabled)
+            print("  Details! detected: " .. detected)
+            print("  Listener: " .. listener)
+            if db.detailsLastSync and db.detailsLastSync.combatTime then
+                print(string.format("  Last manual sync: %ds, %d top DPS, %d top healers",
+                    db.detailsLastSync.combatTime,
+                    db.detailsLastSync.topDps and #db.detailsLastSync.topDps or 0,
+                    db.detailsLastSync.topHealers and #db.detailsLastSync.topHealers or 0))
+            end
+        else
+            print("|cff00ff00[BoneyWorldBosses]|r Details! commands:")
+            print("  /bwb details status - Show Details! detection + listener state")
+            print("  /bwb details sync   - Capture last Details! segment + attach to pending kill")
+            print("  /bwb details on|off - Toggle Details! capture")
+            print("  /bwb details dump   - Print most recent captured top-3 DPS/heal payload")
+        end
+
     elseif cmd == "test" then
         local subcmd = args[2]
         if subcmd == "kill" then
@@ -1869,6 +2187,7 @@ local function SlashHandler(msg)
         print("  /bwb options          - Open settings panel")
         print("  /bwb test kill        - Test mode (next creature kill = test report)")
         print("  /bwb dbm              - DBM stats sync (status/sync/on/off/dump)")
+        print("  /bwb details          - Details! top DPS/heal capture (status/sync/on/off/dump)")
         print("  /bwb profile          - Declare main spec for current character (popup / clear / list)")
         print("  /bwb layers           - Send layer update to Discord (reloads UI)")
         print("  /bwb callout          - Post @everyone boss callout to Discord (reloads UI)")
