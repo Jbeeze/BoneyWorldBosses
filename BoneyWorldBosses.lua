@@ -6,7 +6,7 @@
 --   Layer Updates: NWB layer data reporting to Discord
 
 local ADDON_NAME = "BoneyWorldBosses"
-local VERSION = "3.5.0"
+local VERSION = "3.5.1"
 local SCHEMA_VERSION = 3
 
 -- Create AceAddon (NWB bundles LibStub + AceAddon-3.0)
@@ -659,12 +659,15 @@ end
 -- IsPlayer() includes any human-controlled actor (raid, party, or visible
 -- friendlies outside group). Pet damage is already rolled up to the owner
 -- by Details!, so we can ignore IsPetOrGuardian actors entirely.
+-- GetActorList is a combat method (not a container method) that takes the
+-- attribute index (1 = damage). Calling it on the container raised
+-- "attempt to index field '?'" inside Details! when the container slot
+-- was nil.
 local function ReadTopDpsFromCombat(combat, n)
     if not combat then return {} end
-    local container = combat:GetContainer(1)
-    if not container then return {} end
-    local actors = container:GetActorList()
-    if not actors then return {} end
+    if not combat[1] then return {} end
+    local ok, actors = pcall(combat.GetActorList, combat, 1)
+    if not ok or not actors then return {} end
 
     local players = {}
     for _, actor in ipairs(actors) do
@@ -686,10 +689,9 @@ end
 -- actor.last_hps is overheal-excluded by Details!.
 local function ReadTopHpsFromCombat(combat, n)
     if not combat then return {} end
-    local container = combat:GetContainer(2)
-    if not container then return {} end
-    local actors = container:GetActorList()
-    if not actors then return {} end
+    if not combat[2] then return {} end
+    local ok, actors = pcall(combat.GetActorList, combat, 2)
+    if not ok or not actors then return {} end
 
     local players = {}
     for _, actor in ipairs(actors) do

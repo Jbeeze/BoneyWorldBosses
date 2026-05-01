@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.5.1 — unreleased
+**Fix `GetActorList` nil error during Details! capture**
+
+### Fixed
+- **`Details/classes/class_combat.lua:893: attempt to index field '?' (a nil value)`** — `ReadTopDpsFromCombat` / `ReadTopHpsFromCombat` were calling `container:GetActorList()` on the actor container returned by `combat:GetContainer(n)`. `GetActorList` is a method on the **combat** object, not the container, and it expects an attribute index argument. Calling it on the container with no args resolved (via metatable inheritance) to `combat.GetActorList(container, nil)`, which evaluates `self[nil]._ActorTable` — `self[nil]` is `nil`, hence the index crash.
+  - Switched both readers to the documented API: `combat:GetActorList(1)` for damage and `combat:GetActorList(2)` for healing. No `GetContainer` round-trip.
+  - Added a guard for `combat[attr]` being nil (segment with no damage / healing data) and wrapped the call in `pcall` so any future internal Details! errors degrade to "no stats captured" instead of bubbling up an `xpcall` from Details!'s event dispatcher.
+
 ## v3.5.0 — unreleased
 **Profile popup, DBM stats sync, Details! top-3, scout-off heartbeat handoff**
 
